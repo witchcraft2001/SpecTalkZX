@@ -1,0 +1,4 @@
+-I/Users/dmitry/dev/zx/sprinter/sdcc45-sprinter-sdk/include
+-Iinclude
+-D__SDCC
+-ferror-limit=0

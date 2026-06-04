@@ -14,6 +14,10 @@ entire ZX/z88dk platform layer (rendering, keyboard, UART, file I/O, overlays,
 BPE, memory map, build) with a Sprinter HAL on the SDCC 4.5 SDK at
 `/Users/dmitry/dev/zx/sprinter/sdcc45-sprinter-sdk`.
 
+Hard-won Sprinter platform facts (memory layout/WIN1-only, keyboard codes, CP866,
+`dss_clear`/`dss_puts`/scroll quirks) are recorded in **`sprinter/README.md`** —
+read its "Verified platform facts" section before touching the port's HAL.
+
 The rest of this file documents the **original ZX Spectrum codebase** (the source
 of truth being ported). Its build system, memory tricks, and ASM layer are
 ZX-specific and largely do **not** carry over to the Sprinter target.
