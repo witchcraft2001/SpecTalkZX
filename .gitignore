@@ -21,3 +21,6 @@ __pycache__/
 # Editor
 *.swp
 *~
+*.EXE
+*.img
+.DS_Store
