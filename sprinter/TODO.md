@@ -28,13 +28,28 @@ idiomatic Sprinter-SDK C. Track and remove:
 
 ## Functional TODO
 
-- [ ] Persist user settings to a file (e.g. SPECTALK.CFG next to the EXE or in
-      %NET_DIR%): last server[:port] and last nick (later: nickpass, autoconnect,
-      theme, toggles — mirrors the original SpecTalk config keys). On startup:
-      load them and either (a) pre-seed the input history so Up recalls
-      `/server <last>` / `/nick <last>`, and/or (b) show a hint/offer to reuse the
-      previous parameters (e.g. "/server to reconnect to <last>"). Save on
-      successful /server and /nick.
+- [ ] On-the-fly UTF-8 <-> CP866 recoding (the world is UTF-8; Sprinter renders
+      CP866). A persisted setting (toggle, default ON for public channels):
+      - RECEIVE (incoming text UTF-8 -> CP866): decode UTF-8 sequences; map
+        Cyrillic U+0400..U+04FF and common punctuation (dashes, quotes, NBSP...)
+        to their CP866 byte; ASCII (<0x80) passes through; unmappable -> '?'.
+        Apply to the displayable text of PRIVMSG/NOTICE/TOPIC/NAMES; protocol
+        tokens (commands, nicks, channels) are ASCII and untouched. Lines are
+        assembled whole before recoding, so multi-byte sequences never split.
+      - SEND (CP866 input -> UTF-8): expand high bytes (0x80..0xFF) to their
+        UTF-8 multi-byte form before transmit; ASCII passes through.
+      - Needs a CP866<->Unicode table for 0x80..0xFF (128 entries; the standard
+        CP866 codepage). Replaces the original SpecTalk's lossy UTF-8->ASCII
+        folding with proper Cyrillic-preserving recoding.
+      - Command e.g. /encoding (utf8|cp866|raw); save in SPECTALK.CFG.
+      - Best implemented with / after the WIN1+WIN2 code layout (adds ~0.5 KB).
+
+
+- [x] Persist user settings to SPECTALK.CFG (current dir): last server/port/nick.
+      On startup: set the nick, seed the input history with `/server <last> <port>`
+      (Up recalls it), and show a hint. Saved on /server and /nick.
+      TODO extend: nickpass, autoconnect, theme, toggles (original config keys);
+      option to store in %NET_DIR%; fall back gracefully if medium is read-only.
 - [ ] Per-window paged history (NEXT): a DSS page per window (Dss.GetMem, up to
       16 KB), append all messages, restore last lines on switch, PgUp/PgDn to
       scroll. Uses the WIN3-map + copy-to-WIN2-before-DSS discipline.
@@ -45,6 +60,12 @@ idiomatic Sprinter-SDK C. Track and remove:
 - [ ] net layer: detect ESP errors (CLOSED/ERROR) in net_connect instead of fixed
       delays; surface connect failures; reconnect.
 - [ ] Hardware scroll via BIOS #8A (O(1)) to replace the RAM-ring chat redraw.
-- [ ] When code+data outgrow WIN1 (16 KB), allocate WIN2 via Dss.GetMem+SetWin2
-      and move buffers there.
+- [ ] CODE LIMIT: code is in WIN1 only (crt0_page2 puts data+stack in the
+      allocated WIN2), so code caps at ~15.5 KB. When code approaches it, switch
+      to the SDK "Default Layout" (32 KB WIN1+WIN2): code 0x4100 spanning into
+      WIN2, data+stack high. Needs (a) a custom crt0 that zeroes _DATA but does
+      NOT GETMEM (default crt0 only clears _BSS, and our globals live in _DATA),
+      and (b) padding the loaded image to >=16 KB so DSS maps 2 pages (the WIN2
+      page is only "owned" if the image reaches it). Deferred until needed.
+      Beyond 32 KB: overlays / dss_getmem_pages + setwin_page, or --codeseg banking.
 - [ ] Stage 7: NE2000 backend behind net.h; packaging + docs.

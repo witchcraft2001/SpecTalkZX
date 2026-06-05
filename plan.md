@@ -214,8 +214,11 @@ Decisions:
   link is already up from net.cfg + NETUP. (Check `…/sprinter_wifi/network/src/apps/netup.asm`.)
 - **80×32 layout redesign.** The UI was tuned for 64×17; rework banner, status,
   info, and input regions for 80 cols × 32 rows (more scrollback, wider input).
-- **Character set / UTF-8.** Keep the existing UTF-8→ASCII folding; map to the
-  Sprinter font/codepage.
+- **Character set / UTF-8 ↔ CP866 (planned feature).** The Sprinter renders
+  CP866; IRC networks are UTF-8. Instead of the original's lossy UTF-8→ASCII
+  folding, do proper bidirectional recoding: incoming text UTF-8→CP866 (Cyrillic
+  preserved), outgoing CP866→UTF-8, behind a persisted toggle (default on for
+  public channels). Needs a CP866↔Unicode table (0x80–0xFF). See sprinter/TODO.md.
 
 ## Reference index
 

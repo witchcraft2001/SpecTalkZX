@@ -39,8 +39,9 @@ SPRLIB  = $(SDK)/build/sprinter.lib
 
 # --- Apps: <NAME>_OBJS lists the .rel objects for each EXE -----------------
 APPS = SPECTALK NETDIAG NETIRC
-SPECTALK_OBJS = $(BUILD)/main.rel    $(BUILD)/term.rel  $(BUILD)/irc.rel \
-                $(BUILD)/net_esp.rel $(BUILD)/netcfg.rel $(BUILD)/isauart.rel $(BUILD)/uart.rel
+SPECTALK_OBJS = $(BUILD)/main.rel    $(BUILD)/term.rel  $(BUILD)/irc.rel  $(BUILD)/hist.rel \
+                $(BUILD)/cfg.rel     $(BUILD)/net_esp.rel $(BUILD)/netcfg.rel \
+                $(BUILD)/isauart.rel $(BUILD)/uart.rel
 NETDIAG_OBJS  = $(BUILD)/netdiag.rel $(BUILD)/netcfg.rel $(BUILD)/isauart.rel
 NETIRC_OBJS   = $(BUILD)/netirc.rel  $(BUILD)/netcfg.rel $(BUILD)/isauart.rel $(BUILD)/uart.rel
 

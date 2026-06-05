@@ -13,6 +13,7 @@
 #include "term.h"
 #include "net.h"
 #include "irc.h"
+#include "cfg.h"
 
 #define K_ESC   0x1B
 #define K_ENTER 0x0D
@@ -24,50 +25,109 @@
 #define SC_DOWN  0x52
 #define SC_HOME  0x57
 #define SC_END   0x51
+#define SC_PGUP  0x59
+#define SC_PGDN  0x53
 
-#define IN_MAX  120
-#define HIST_N  8
+#define IN_MAX    400   /* IRC line limit is 512B incl CRLF; ~400 text is the safe cap */
+#define HIST_N    8
 
 /* ---- small string helpers ------------------------------------------ */
 static u8 starts(const char *s, const char *p) { while (*p) { if (*s != *p) return 0; s++; p++; } return 1; }
+static void s_cpy(char *d, const char *s, u8 max) { u8 i = 0; while (s[i] && i < (u8)(max - 1)) { d[i] = s[i]; i++; } d[i] = 0; }
+
+static settings_t S;     /* persisted last server/port/nick */
 
 /* ---- editor state -------------------------------------------------- */
 static char inbuf[IN_MAX];
-static u8   inlen, incur;
-static char hist[HIST_N][IN_MAX];
-static u8   histl[HIST_N], hcount, hbrowse;
+static u16  inlen, incur;
 static u8   rxb[256];
+
+/* Recall history lives in its own 16K DSS page — full-length entries, never
+ * truncated. Slot i holds one entry (up to IN_MAX bytes); HIST_N slots ring. */
+#define EH_SLOT IN_MAX
+static u8   eh_page;            /* DSS block id (0xFF = none) */
+static u16  ehl[HIST_N];        /* length of each ring slot's entry */
+static u8   ehcount, ehfirst, ehbrowse;
 
 static void redraw(void) { term_input(inbuf, inlen, incur); }
 
 static void ins_char(u8 c) {
-    u8 i;
+    u16 i;
     if (inlen >= IN_MAX - 1) return;
     if (incur > inlen) incur = inlen;
     for (i = inlen; i > incur; i--) inbuf[i] = inbuf[i - 1];
     inbuf[incur] = (char)c; inlen++; incur++;
 }
 static void del_before(void) {
-    u8 i;
+    u16 i;
     if (incur == 0) return;
     for (i = incur - 1; i < inlen - 1; i++) inbuf[i] = inbuf[i + 1];
     inlen--; incur--;
 }
-static void hist_load(const char *src, u8 len) {
-    u8 i; for (i = 0; i < len; i++) inbuf[i] = src[i]; inlen = len; incur = len;
+static void eh_init(void) {
+    eh_page = dss_getmem();              /* one 16K page; 0xFF if it fails */
+    ehcount = 0; ehfirst = 0; ehbrowse = 0;
 }
-static void hist_push(void) {
-    u8 i;
-    if (inlen == 0) return;
-    if (hcount == HIST_N) {
-        u8 r; for (r = 1; r < HIST_N; r++) {
-            for (i = 0; i < histl[r]; i++) hist[r - 1][i] = hist[r][i];
-            histl[r - 1] = histl[r];
-        }
-        hcount = HIST_N - 1;
-    }
-    for (i = 0; i < inlen; i++) hist[hcount][i] = inbuf[i];
-    histl[hcount] = inlen; hcount++; hbrowse = hcount;
+
+/* store `len` bytes from `src` into ring slot `ring` (page mapped to WIN3) */
+static void eh_store(u8 ring, const char *src, u16 len) {
+    char *dst; u16 i;
+    if (eh_page == 0xFF) return;
+    if (len > EH_SLOT) len = EH_SLOT;
+    dss_setwin(3, eh_page);              /* map page; no DSS calls until after the copy */
+    dst = (char *)(0xC000 + (u16)ring * EH_SLOT);
+    for (i = 0; i < len; i++) dst[i] = src[i];
+    ehl[ring] = len;
+}
+
+/* append an entry to the recall ring (full length, no truncation) */
+static void eh_push(const char *src, u16 len) {
+    u8 ring;
+    if (len == 0) return;
+    if (ehcount < HIST_N) { ring = (u8)((ehfirst + ehcount) % HIST_N); ehcount++; }
+    else { ring = ehfirst; ehfirst = (u8)((ehfirst + 1) % HIST_N); }
+    eh_store(ring, src, len);
+    ehbrowse = ehcount;
+}
+
+static void eh_seed(const char *s) {
+    u16 len = 0; while (s[len]) len++;
+    eh_push(s, len);
+}
+
+/* load logical entry `logical` (0 = oldest) from the page into inbuf */
+static void eh_load(u8 logical) {
+    u8 ring = (u8)((ehfirst + logical) % HIST_N);
+    u16 len, i;
+    const char *src;
+    if (eh_page == 0xFF) { inlen = 0; incur = 0; return; }
+    len = ehl[ring];
+    dss_setwin(3, eh_page);
+    src = (const char *)(0xC000 + (u16)ring * EH_SLOT);
+    for (i = 0; i < len; i++) inbuf[i] = src[i];
+    inlen = len; incur = len;
+}
+
+static void save_settings(void) {
+    s_cpy(S.nick, irc_nick_str(), sizeof(S.nick));
+    cfg_save(&S);
+}
+
+/* default nick "SprXXXX" with a 16-bit hex from the current date/time, so two
+ * machines running the stock client don't collide. Persisted until /nick. */
+static void gen_nick(char *o) {
+    static const char hx[] = "0123456789ABCDEF";
+    dss_time_t t;
+    dss_date_t d;
+    u16 v;
+    dss_gettime(&t);
+    dss_getdate(&d);
+    v = (u16)((u16)t.hour * 3607u + (u16)t.minute * 61u + t.second
+              + (u16)d.day * 131u + (u16)d.month * 17u + d.year);
+    o[0] = 'S'; o[1] = 'p'; o[2] = 'r';
+    o[3] = hx[(v >> 12) & 0xF]; o[4] = hx[(v >> 8) & 0xF];
+    o[5] = hx[(v >> 4) & 0xF];  o[6] = hx[v & 0xF];
+    o[7] = 0;
 }
 
 /* ---- commands ------------------------------------------------------ */
@@ -87,8 +147,11 @@ static void do_command(char *line) {
         if (!port[0]) port = "6667";
         term_notif("connecting...");
         irc_connect(host, port);
+        s_cpy(S.server, host, sizeof(S.server));
+        s_cpy(S.port, port, sizeof(S.port));
+        save_settings();
     } else if (starts(cmd, "nick")) {
-        if (arg[0]) irc_set_nick(arg);
+        if (arg[0]) { irc_set_nick(arg); save_settings(); }
     } else if (starts(cmd, "join")) {
         if (arg[0]) irc_join(arg);
     } else if (starts(cmd, "part")) {
@@ -99,16 +162,25 @@ static void do_command(char *line) {
         irc_next_window();
     } else if (starts(cmd, "raw")) {
         irc_raw(arg);
+    } else if (starts(cmd, "ignore")) {
+        irc_ignore(arg);
+    } else if (starts(cmd, "away")) {
+        irc_away(arg);
+    } else if (starts(cmd, "timestamp") || starts(cmd, "ts")) {
+        irc_toggle_ts();
     } else if (starts(cmd, "help")) {
-        term_add_line("Commands:");
-        term_add_line("  /server <host> [port]  - connect (default 6667)");
-        term_add_line("  /nick <name>           - change nick");
-        term_add_line("  /join #channel         - join (opens a window)");
-        term_add_line("  /part                  - leave current channel");
-        term_add_line("  /quit                  - disconnect");
-        term_add_line("  /raw <text>            - send a raw IRC line");
-        term_add_line("  text                   - message current window");
-        term_add_line("  TAB switch window, arrows/Home/End edit, Up/Down hist");
+        irc_local("Commands:");
+        irc_local("  /server <host> [port]  - connect (default 6667)");
+        irc_local("  /nick <name>           - change nick");
+        irc_local("  /join #channel         - join (opens a window)");
+        irc_local("  /part                  - leave current channel");
+        irc_local("  /quit                  - disconnect");
+        irc_local("  /raw <text>            - send a raw IRC line");
+        irc_local("  /ignore <nick>         - toggle ignoring a nick");
+        irc_local("  /away [message]        - set/clear away");
+        irc_local("  /timestamp (/ts)       - toggle message timestamps");
+        irc_local("  text                   - message current window");
+        irc_local("  TAB window, arrows/Home/End edit, Up/Down hist, PgUp/PgDn scroll");
     } else {
         term_notif("unknown command (try /help)");
     }
@@ -117,7 +189,7 @@ static void do_command(char *line) {
 static void on_enter(void) {
     inbuf[inlen] = 0;
     if (inlen == 0) return;
-    hist_push();
+    eh_push(inbuf, inlen);
     if (inbuf[0] == '/') do_command(inbuf);
     else irc_say(inbuf);
     inlen = 0; incur = 0;
@@ -127,22 +199,36 @@ static void on_enter(void) {
 void main(void) {
     dss_key_t key, consume;
     u16 i, n;
-    u8 c, quit_pending = 0;
+    u8 quit_pending = 0;
 
     term_init();
-    irc_init("SprSpecTalk");
+    cfg_load(&S);
+    if (!S.nick[0]) { gen_nick(S.nick); cfg_save(&S); }   /* unique default nick, persisted */
+    irc_init(S.nick);
 
-    inlen = 0; incur = 0; hcount = 0; hbrowse = 0;
+    inlen = 0; incur = 0;
+    eh_init();
     for (i = 0; i < IN_MAX; i++) inbuf[i] = 0;
-    for (c = 0; c < HIST_N; c++) histl[c] = 0;
 
     if (net_init() == NET_NO_HW) {
-        term_add_line("No SprinterWiFi (ESP) UART detected.");
-        term_add_line("UI works, networking unavailable.");
+        irc_local("No SprinterWiFi (ESP) UART detected.");
+        irc_local("UI works, networking unavailable.");
     } else {
-        term_add_line("ESP ready. Run NETUP first if Wi-Fi is not up.");
-        term_add_line("Try:  /server irc.libera.chat   then  /join #test");
-        term_add_line("/help for commands.");
+        irc_local("ESP ready. Run NETUP first if Wi-Fi is not up.");
+        irc_local("/help for commands.");
+    }
+
+    if (S.loaded && S.server[0]) {           /* offer the last server via history */
+        char seed[64], *o = seed;
+        const char *p = "/server ";
+        while (*p) *o++ = *p++;
+        p = S.server; while (*p) *o++ = *p++;
+        if (S.port[0]) { *o++ = ' '; p = S.port; while (*p) *o++ = *p++; }
+        *o = 0;
+        eh_seed(seed);
+        irc_local("Saved server found: press Up to recall /server, ENTER to connect.");
+    } else {
+        irc_local("Try:  /server irc.libera.chat   then  /join #test");
     }
     term_notif("/help | /server <host> | /join #chan | TAB=window | ESC=exit");
     redraw();
@@ -169,8 +255,10 @@ void main(void) {
             else if (key.scan == SC_RIGHT) { if (incur < inlen) { incur++; redraw(); } }
             else if (key.scan == SC_HOME)  { incur = 0; redraw(); }
             else if (key.scan == SC_END)   { incur = inlen; redraw(); }
-            else if (key.scan == SC_UP)    { if (hbrowse > 0) { hbrowse--; hist_load(hist[hbrowse], histl[hbrowse]); redraw(); } }
-            else if (key.scan == SC_DOWN)  { if (hbrowse < hcount) { hbrowse++; if (hbrowse == hcount) { inlen = 0; incur = 0; } else hist_load(hist[hbrowse], histl[hbrowse]); redraw(); } }
+            else if (key.scan == SC_PGUP)  { irc_scroll_up(); redraw(); }
+            else if (key.scan == SC_PGDN)  { irc_scroll_down(); redraw(); }
+            else if (key.scan == SC_UP)    { if (ehbrowse > 0) { ehbrowse--; eh_load(ehbrowse); redraw(); } }
+            else if (key.scan == SC_DOWN)  { if (ehbrowse < ehcount) { ehbrowse++; if (ehbrowse == ehcount) { inlen = 0; incur = 0; } else eh_load(ehbrowse); redraw(); } }
             else if ((key.ascii >= 32 && key.ascii < 127) || key.ascii >= 0x80) { ins_char(key.ascii); redraw(); }
         }
     }

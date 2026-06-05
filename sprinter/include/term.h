@@ -19,9 +19,8 @@
 /* Row map (1-based) */
 #define BANNER_ROW  1
 #define CHAT_TOP    3
-#define CHAT_H      26              /* rows 3..28 */
+#define CHAT_H      27              /* rows 3..29 (inverse status bar is the separator) */
 #define CHAT_BOT    (CHAT_TOP + CHAT_H - 1)
-#define SEP_ROW     29
 #define STATUS_ROW  30
 #define NOTIF_ROW   31
 #define INPUT_ROW   32
@@ -32,15 +31,14 @@
 #define ATTR_BANNER 0x17            /* white on blue  */
 #define ATTR_STATUS 0x70            /* black on white (inverse bar) */
 #define ATTR_NOTIF  0x06            /* yellow on black */
-#define ATTR_SEP    0x08            /* dim blue ink on black */
 
 void term_init(void);
 void term_banner(const char *title);   /* left side of banner row */
 void term_clock(void);                  /* HH:MM:SS at right of banner row */
-void term_add_line(const char *s);      /* append to chat area, scroll if full */
-void term_clear_chat(void);              /* empty the chat area (e.g. on window switch) */
+void term_draw_row(u8 row, const char *s); /* draw chat row 0..CHAT_H-1 from a string */
+void term_clear_chat(void);              /* blank the whole chat area */
 void term_status(const char *s);        /* status bar text */
 void term_notif(const char *s);         /* notification line text */
-void term_input(const char *buf, u8 len, u8 cur);  /* redraw input row + cursor */
+void term_input(const char *buf, u16 len, u16 cur);  /* redraw input row + cursor (h-scroll) */
 
 #endif /* TERM_H */

@@ -6,6 +6,7 @@
 #include "irc.h"
 #include "term.h"
 #include "net.h"
+#include "hist.h"
 
 #define WIN_NAME  24
 #define F_ACTIVE  0x01
@@ -21,10 +22,15 @@ typedef struct {
     u8   page;          /* reserved: DSS history page block id (future) */
 } Window;
 
+#define MAX_IGN 5
+
 static Window win[MAX_WIN];
 static u8     wcur;
 static char   mynick[20];
 static u8     registered;
+static u8     ts_on = 1;                 /* timestamp messages */
+static char   ign[MAX_IGN][20];          /* ignored nicks */
+static char   tsbuf[488];                /* "[HH:MM] " + line */
 
 /* ---- string helpers ------------------------------------------------ */
 static u8 lc(u8 c) { return (c >= 'A' && c <= 'Z') ? (u8)(c + 32) : c; }
@@ -39,7 +45,7 @@ static void s_cpy(char *d, const char *s, u8 max) { u8 i = 0; while (s[i] && i <
 static u16 to_u16(const char *s) { u16 v = 0; while (*s >= '0' && *s <= '9') { v = (u16)(v * 10 + (*s - '0')); s++; } return v; }
 
 /* ---- output line builder ------------------------------------------ */
-static char  out[300];
+static char  out[480];   /* must hold "<nick> " + a full ~400-char message */
 static char *ob;
 static void o_init(void) { ob = out; }
 static void o_str(const char *s) { while (*s && ob < out + sizeof(out) - 1) *ob++ = *s++; }
@@ -83,6 +89,7 @@ static i8 win_add(const char *name, u8 flags) {
             s_cpy(win[i].name, name, WIN_NAME);
             win[i].flags = (u8)(F_ACTIVE | flags);
             win[i].users = 0;
+            hist_open(i);
             return (i8)i;
         }
     }
@@ -93,7 +100,7 @@ static void win_switch(u8 idx) {
     if (idx >= MAX_WIN || !(win[idx].flags & F_ACTIVE)) return;
     wcur = idx;
     win[idx].flags &= (u8)~(F_UNREAD | F_MENTION);
-    term_clear_chat();          /* TODO: restore paged history here */
+    hist_feed_tail(idx);        /* restore this window's recent history */
     banner_refresh();
     status_refresh();
 }
@@ -101,19 +108,39 @@ static void win_switch(u8 idx) {
 static void win_close(u8 idx) {
     if (idx == 0) return;       /* never close the server window */
     if (win[idx].flags & F_ACTIVE) {
-        if (win[idx].name[0]) net_is_connected();   /* no-op keep */
         win[idx].flags = 0;
         win[idx].name[0] = 0;
+        hist_close(idx);
         if (idx == wcur) win_switch(0);
         else status_refresh();
     }
 }
 
-/* route a finished line to a window: show if current, else raise activity */
+static u8 is_ignored(const char *nick) {
+    u8 i;
+    for (i = 0; i < MAX_IGN; i++) if (ign[i][0] && ieq(ign[i], nick)) return 1;
+    return 0;
+}
+
+/* route a finished line to a window: store in history; show if current+live */
 static void win_print(i8 idx, const char *line) {
+    u8 w;
     if (idx < 0) idx = 0;
-    if ((u8)idx == wcur) term_add_line(line);
-    else { win[(u8)idx].flags |= F_UNREAD; status_refresh(); }
+    w = (u8)idx;
+    if (ts_on) {                         /* prepend "[HH:MM] " */
+        dss_time_t t;
+        char *o = tsbuf;
+        const char *p = line;
+        dss_gettime(&t);
+        *o++ = '['; *o++ = (char)('0' + (t.hour / 10) % 10); *o++ = (char)('0' + t.hour % 10);
+        *o++ = ':'; *o++ = (char)('0' + (t.minute / 10) % 10); *o++ = (char)('0' + t.minute % 10);
+        *o++ = ']'; *o++ = ' ';
+        while (*p && o < tsbuf + sizeof(tsbuf) - 1) *o++ = *p++;
+        *o = 0;
+        line = tsbuf;
+    }
+    hist_add(w, line, (u8)(w == wcur && hist_is_live(w)));
+    if (w != wcur) { win[w].flags |= F_UNREAD; status_refresh(); }
 }
 
 static i8 route_win(const char *usr, const char *target) {
@@ -159,6 +186,7 @@ static void h_privmsg(const char *usr, char *target, char *txt, u8 is_notice) {
     i8 w;
     u8 mention;
     if (!*target || !*txt) return;
+    if (is_ignored(usr)) return;
     if (txt[0] == 1) { handle_ctcp(usr, target, txt + 1); return; }
 
     w = route_win(usr, target);
@@ -255,6 +283,7 @@ static void h_numeric(u16 n, const char *txt) {
     } else if (n == 1) {
         registered = 1;
         win_print(0, txt);
+        term_notif("connected. /join #channel to chat.  TAB=window  /help");
     } else if (n == 433) {                            /* nick in use -> append '_' */
         u8 l = 0; while (mynick[l]) l++;
         if (l < sizeof(mynick) - 1) { mynick[l] = '_'; mynick[l + 1] = 0; }
@@ -336,9 +365,11 @@ void irc_feed(const u8 *data, u16 n) {
 void irc_init(const char *nick) {
     u8 i;
     for (i = 0; i < MAX_WIN; i++) { win[i].flags = 0; win[i].name[0] = 0; win[i].users = 0; }
+    hist_init();
     s_cpy(mynick, nick, sizeof(mynick));
     s_cpy(win[0].name, "(server)", WIN_NAME);
     win[0].flags = F_ACTIVE | F_SERVER;
+    hist_open(0);
     wcur = 0; registered = 0; asmpos = 0;
     banner_refresh();
     status_refresh();
@@ -356,6 +387,10 @@ i8 irc_connect(const char *host, const char *port) {
 }
 
 u8 irc_connected(void) { return net_is_connected(); }
+
+const char *irc_nick_str(void) { return mynick; }
+
+void irc_local(const char *line) { win_print((i8)wcur, line); }   /* local note -> current window */
 
 void irc_set_nick(const char *n) {
     s_cpy(mynick, n, sizeof(mynick));
@@ -377,7 +412,34 @@ void irc_say(const char *text) {
     if (wcur == 0 || !net_is_connected()) { term_notif("join a channel first (/join #chan)"); return; }
     net_send("PRIVMSG "); net_send(win[wcur].name); net_send(" :"); net_send(text); net_send("\r\n");
     o_init(); o_c('<'); o_str(mynick); o_str("> "); o_str(text); o_end();
-    term_add_line(out);
+    win_print((i8)wcur, out);
+}
+
+void irc_scroll_up(void)   { hist_scroll(wcur, -1); }
+void irc_scroll_down(void) { hist_scroll(wcur, 1); }
+
+void irc_toggle_ts(void) {
+    ts_on = !ts_on;
+    irc_local(ts_on ? "* timestamps on" : "* timestamps off");
+}
+
+void irc_ignore(const char *nick) {
+    u8 i;
+    if (!nick[0]) {                              /* list current ignores */
+        irc_local("* ignore list:");
+        for (i = 0; i < MAX_IGN; i++) if (ign[i][0]) irc_local(ign[i]);
+        return;
+    }
+    for (i = 0; i < MAX_IGN; i++)                /* toggle off if present */
+        if (ign[i][0] && ieq(ign[i], nick)) { ign[i][0] = 0; o_init(); o_str("* un-ignored "); o_str(nick); o_end(); irc_local(out); return; }
+    for (i = 0; i < MAX_IGN; i++)                /* else add */
+        if (!ign[i][0]) { s_cpy(ign[i], nick, sizeof(ign[0])); o_init(); o_str("* ignoring "); o_str(nick); o_end(); irc_local(out); return; }
+    irc_local("* ignore list full");
+}
+
+void irc_away(const char *msg) {
+    if (msg[0]) { net_send("AWAY :"); net_send(msg); net_send("\r\n"); irc_local("* you are now away"); }
+    else        { net_send("AWAY\r\n"); irc_local("* you are back"); }
 }
 
 void irc_raw(const char *line) { net_send(line); net_send("\r\n"); }
