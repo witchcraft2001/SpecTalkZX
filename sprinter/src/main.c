@@ -181,8 +181,18 @@ static void do_command(char *line) {
         term_notif("disconnected");
     } else if (starts(cmd, "raw")) {
         net_send(arg); net_send("\r\n");
+    } else if (starts(cmd, "help")) {
+        term_add_line("Commands:");
+        term_add_line("  /server <host> [port]  - connect (default 6667)");
+        term_add_line("  /nick <name>           - change nick");
+        term_add_line("  /join #channel         - join a channel");
+        term_add_line("  /part                  - leave current channel");
+        term_add_line("  /quit                  - disconnect");
+        term_add_line("  /raw <text>            - send a raw IRC line");
+        term_add_line("  text                   - message the current channel");
+        term_add_line("  arrows/Home/End edit, Up/Down history, ESC exits");
     } else {
-        term_notif("unknown command");
+        term_notif("unknown command (try /help)");
     }
 }
 
@@ -223,7 +233,7 @@ void main(void) {
         term_add_line("Try:  /server irc.libera.chat   then  /join #test");
     }
     show_status();
-    term_notif("/server <host> [port] | /nick | /join #chan | /quit | ESC=exit");
+    term_notif("/help for commands | /server <host> | /join #chan | ESC=exit");
     redraw();
 
     for (;;) {
@@ -253,7 +263,11 @@ void main(void) {
         }
     }
 
-    if (net_is_connected()) { net_send("QUIT :bye\r\n"); net_close(); }
+    if (net_is_connected()) {
+        term_notif("disconnecting, please wait...");   /* teardown takes a few seconds */
+        net_send("QUIT :bye\r\n");
+        net_close();
+    }
     dss_clrscr();
     dss_gotoxy(1, 1);
     dss_puts("SpecTalk Sprinter - bye.\r\n");

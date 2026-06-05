@@ -100,9 +100,33 @@ void term_clock(void) {
     put2(t.second);
 }
 
-void term_add_line(const char *s) {
+#define WRAP 78   /* max chars per chat row before wrapping */
+
+static void add_one(const char *s) {
     if (chat_store(s)) chat_redraw();        /* scrolled: repaint all (cheap via PCHARS) */
     else draw_chat_row(chat_n - 1);          /* appended: draw only the new row */
+}
+
+/* Append a line, word-wrapping anything longer than WRAP onto further rows. */
+void term_add_line(const char *s) {
+    char chunk[WRAP + 1];
+    u8 i, brk;
+    for (;;) {
+        /* does the remainder fit? */
+        i = 0;
+        while (s[i] && i < WRAP) i++;
+        if (s[i] == 0) { add_one(s); return; }      /* fits on one row */
+        /* break at the last space within WRAP, else hard-break at WRAP */
+        brk = WRAP;
+        while (brk > 0 && s[brk] != ' ') brk--;
+        if (brk == 0) brk = WRAP;
+        for (i = 0; i < brk; i++) chunk[i] = s[i];
+        chunk[i] = 0;
+        add_one(chunk);
+        s += brk;
+        while (*s == ' ') s++;                        /* drop the break space(s) */
+        if (*s == 0) return;
+    }
 }
 
 void term_status(const char *s) {

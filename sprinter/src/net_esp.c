@@ -31,11 +31,10 @@ static void at(const char *cmd, u8 secs) {
 
 /* back to command mode + drop any leftover socket */
 static void esp_reset(void) {
-    quiet(2);
+    quiet(1);                 /* silence before escape (guard ~1s, plenty) */
     uart_tx_str("+++");
-    quiet(2);
-    uart_tx_str("\r\n");
-    quiet(1);
+    quiet(1);                 /* silence after escape */
+    uart_tx_str("\r\n");      /* flush any partial command-mode buffer */
     at("ATE0", 1);
     at("AT+CIPCLOSE", 1);
 }
