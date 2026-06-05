@@ -17,13 +17,15 @@ SDK     ?= /Users/dmitry/dev/zx/sprinter/sdcc45-sprinter-sdk
 SDCC    ?= sdcc
 PYTHON  ?= python3
 
-# Keep code + data + stack all inside WIN1 (0x4000-0x7FFF), the single page DSS
-# guarantees for a program loaded at 0x4100. WIN2 (0x8000+) is NOT the program's
-# memory unless explicitly allocated (Dss.GetMem + SetWin2), so data/stack must
-# not live there. (See sprinter_ai_doc .../04_dss/05_dss_exe.md.)
-CODE_LOC  ?= 0x4100
-DATA_LOC  ?= 0x6000
-STACK     ?= 0x7FFF
+# Use the SDK's crt0_page2: it DSS-allocates a 16K page, maps it to WIN2, and
+# moves the stack to 0xBFFF before touching data. That gives the process a real
+# 32K split — code in WIN1 (0x4200..0x7FFF), data+stack in the owned WIN2
+# (0x8000..0xBFFF) — so data at 0x8000 is safe (the earlier corruption was from
+# using WIN2 WITHOUT allocating it). crt0_page2 also zeroes _DATA at startup.
+CRT0_NAME ?= crt0_page2
+CODE_LOC  ?= 0x4200
+DATA_LOC  ?= 0x8000
+STACK     ?= 0x40FF      # EXE-header bootstrap SP; crt0 switches to 0xBFFF
 
 SRCDIR  = src
 BUILD   = build
@@ -32,13 +34,13 @@ DISTR   = distr
 SDCC_TARGET = -mz80
 SDCC_OPT    = --max-allocs-per-node 5000 --opt-code-speed
 CFLAGS      = $(SDCC_TARGET) $(SDCC_OPT) -I$(SDK)/include -Iinclude
-CRT0    = $(SDK)/build/crt0.rel
+CRT0    = $(SDK)/build/$(CRT0_NAME).rel
 SPRLIB  = $(SDK)/build/sprinter.lib
 
 # --- Apps: <NAME>_OBJS lists the .rel objects for each EXE -----------------
 APPS = SPECTALK NETDIAG NETIRC
-SPECTALK_OBJS = $(BUILD)/main.rel    $(BUILD)/term.rel $(BUILD)/net_esp.rel \
-                $(BUILD)/netcfg.rel  $(BUILD)/isauart.rel $(BUILD)/uart.rel
+SPECTALK_OBJS = $(BUILD)/main.rel    $(BUILD)/term.rel  $(BUILD)/irc.rel \
+                $(BUILD)/net_esp.rel $(BUILD)/netcfg.rel $(BUILD)/isauart.rel $(BUILD)/uart.rel
 NETDIAG_OBJS  = $(BUILD)/netdiag.rel $(BUILD)/netcfg.rel $(BUILD)/isauart.rel
 NETIRC_OBJS   = $(BUILD)/netirc.rel  $(BUILD)/netcfg.rel $(BUILD)/isauart.rel $(BUILD)/uart.rel
 

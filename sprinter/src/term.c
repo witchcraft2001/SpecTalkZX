@@ -129,6 +129,12 @@ void term_add_line(const char *s) {
     }
 }
 
+void term_clear_chat(void) {
+    clear_rect(1, CHAT_TOP, SCR_W, CHAT_H, ATTR_NORMAL);
+    chat_n = 0;
+    chat_head = 0;
+}
+
 void term_status(const char *s) {
     clear_row(STATUS_ROW, ATTR_STATUS);
     put_clip(2, STATUS_ROW, s);

@@ -28,6 +28,16 @@ idiomatic Sprinter-SDK C. Track and remove:
 
 ## Functional TODO
 
+- [ ] Persist user settings to a file (e.g. SPECTALK.CFG next to the EXE or in
+      %NET_DIR%): last server[:port] and last nick (later: nickpass, autoconnect,
+      theme, toggles — mirrors the original SpecTalk config keys). On startup:
+      load them and either (a) pre-seed the input history so Up recalls
+      `/server <last>` / `/nick <last>`, and/or (b) show a hint/offer to reuse the
+      previous parameters (e.g. "/server to reconnect to <last>"). Save on
+      successful /server and /nick.
+- [ ] Per-window paged history (NEXT): a DSS page per window (Dss.GetMem, up to
+      16 KB), append all messages, restore last lines on switch, PgUp/PgDn to
+      scroll. Uses the WIN3-map + copy-to-WIN2-before-DSS discipline.
 - [ ] Stage 5b: multi-window/channel model (up to 10), window switching, activity
       indicators, mention highlight.
 - [ ] Stage 6: timestamps, nick coloring, notifications, friends, ignore, NickServ

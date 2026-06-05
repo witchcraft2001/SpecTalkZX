@@ -1,0 +1,36 @@
+/*
+ * irc.h — IRC engine: window model + line parser/dispatch + protocol handlers.
+ *
+ * Adapted from the original SpecTalk irc_handlers.c, de-ZX'd: clean C, renders
+ * through term_*, sends through net_*, no z88dk ABI. Up to MAX_WIN windows
+ * (windows[0] = server/status). The current window is shown in the chat area;
+ * others raise an activity flag. (Per-window paged history is a planned follow-up;
+ * the Window struct reserves a slot for the DSS page id.)
+ */
+#ifndef IRC_H
+#define IRC_H
+
+#include <sprinter.h>
+
+#define MAX_WIN  10
+
+void irc_init(const char *nick);
+
+/* transport-facing */
+void irc_feed(const u8 *data, u16 n);     /* assemble lines from the byte stream, dispatch */
+i8   irc_connect(const char *host, const char *port);  /* net_connect + register */
+u8   irc_connected(void);
+
+/* user commands (called from the input layer) */
+void irc_set_nick(const char *n);
+void irc_join(const char *chan);
+void irc_part(void);
+void irc_say(const char *text);            /* PRIVMSG to current window */
+void irc_raw(const char *line);
+void irc_quit(void);
+
+/* window navigation */
+void irc_next_window(void);
+void irc_prev_window(void);
+
+#endif /* IRC_H */

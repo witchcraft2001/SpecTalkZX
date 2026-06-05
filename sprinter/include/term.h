@@ -38,6 +38,7 @@ void term_init(void);
 void term_banner(const char *title);   /* left side of banner row */
 void term_clock(void);                  /* HH:MM:SS at right of banner row */
 void term_add_line(const char *s);      /* append to chat area, scroll if full */
+void term_clear_chat(void);              /* empty the chat area (e.g. on window switch) */
 void term_status(const char *s);        /* status bar text */
 void term_notif(const char *s);         /* notification line text */
 void term_input(const char *buf, u8 len, u8 cur);  /* redraw input row + cursor */
