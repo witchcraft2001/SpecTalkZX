@@ -69,8 +69,28 @@ i8 net_init(void) {
 const char *net_cfg_baud(void) { return g_baud; }
 u8 net_cfg_div(void) { return g_div; }
 
+/* When the remote closes the socket, ESP-AT leaves transparent mode and emits a
+ * "\r\nCLOSED\r\n" line on the UART. We watch the RX stream for that token (a
+ * state machine that survives chunk boundaries) and clear `connected`. Anchoring
+ * on the leading CR/LF keeps an IRC message that merely contains "CLOSED" from
+ * tripping it (message text never starts a line with that word). */
+static const u8 CLOSED_TOK[] = { 0x0D, 0x0A, 'C', 'L', 'O', 'S', 'E', 'D' };
+static u8 cm;                 /* how many leading bytes of CLOSED_TOK matched so far */
+
+static void watch_closed(const u8 *buf, u16 n) {
+    u16 i;
+    for (i = 0; i < n; i++) {
+        if (buf[i] == CLOSED_TOK[cm]) {
+            if (++cm == sizeof(CLOSED_TOK)) { connected = 0; cm = 0; }
+        } else {
+            cm = (buf[i] == CLOSED_TOK[0]) ? 1 : 0;
+        }
+    }
+}
+
 i8 net_connect(const char *host, const char *port) {
     esp_reset();
+    cm = 0;
     at("AT+CIPMUX=0", 1);
     at("AT+CIPMODE=1", 1);
     /* AT+CIPSTART="TCP","<host>",<port> */
@@ -90,7 +110,9 @@ void net_send(const char *s) {
 }
 
 u16 net_poll(u8 *buf, u16 max) {
-    return uart_drain(buf, max);
+    u16 n = uart_drain(buf, max);
+    if (connected && n) watch_closed(buf, n);
+    return n;
 }
 
 void net_close(void) {

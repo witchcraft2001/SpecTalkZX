@@ -204,6 +204,7 @@ void main(void) {
     dss_key_t key, consume;
     u16 i, n;
     u8 quit_pending = 0;
+    u8 was_conn = 0;
 
     term_init();
     cfg_load(&S);
@@ -263,6 +264,12 @@ void main(void) {
     for (;;) {
         n = net_poll(rxb, sizeof(rxb));   /* drain UART first, before slower work */
         if (n) irc_feed(rxb, n);
+
+        if (was_conn && !irc_connected()) {   /* link dropped (ESP reported CLOSED) */
+            irc_on_disconnect();
+            term_notif("Connection lost (server closed the link)");
+        }
+        was_conn = irc_connected();
 
         term_clock();
 

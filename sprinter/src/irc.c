@@ -146,6 +146,8 @@ static void win_print(i8 idx, const char *line) {
     if (w != wcur) { win[w].flags |= F_UNREAD; status_refresh(); }
 }
 
+static u8 has_dot(const char *s) { while (*s) { if (*s == '.') return 1; s++; } return 0; }
+
 static i8 route_win(const char *usr, const char *target) {
     i8 w;
     if (target[0] == '#' || target[0] == '&') { w = win_find(target); return (w < 0) ? 0 : w; }
@@ -192,7 +194,11 @@ static void h_privmsg(const char *usr, char *target, char *txt, u8 is_notice) {
     if (is_ignored(usr)) return;
     if (txt[0] == 1) { handle_ctcp(usr, target, txt + 1); return; }
 
-    w = route_win(usr, target);
+    /* server NOTICEs (sender is a server host, or target '*'/'AUTH') -> server window */
+    if (is_notice && (target[0] == '*' || has_dot(usr)))
+        w = 0;
+    else
+        w = route_win(usr, target);
     mention = (target[0] == '#' && mynick[0] && istr(txt, mynick));
 
     o_init();
@@ -401,6 +407,14 @@ i8 irc_connect(const char *host, const char *port) {
 }
 
 u8 irc_connected(void) { return net_is_connected(); }
+
+/* Called by the main loop when net_poll reports the link dropped (ESP "CLOSED").
+ * Note it in the server window, drop registration, refresh the status bar. */
+void irc_on_disconnect(void) {
+    registered = 0;
+    win_print(0, "* Disconnected from server (connection closed)");
+    status_refresh();
+}
 
 const char *irc_nick_str(void) { return mynick; }
 
