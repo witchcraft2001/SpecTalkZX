@@ -160,6 +160,8 @@ static void do_command(char *line) {
         char *target = arg, *text = next_arg(arg);
         if (!target[0] || !text[0]) { term_notif("usage: /msg <target> <text>"); return; }
         irc_msg(target, text);
+    } else if (starts(cmd, "me")) {
+        if (arg[0]) irc_me(arg); else term_notif("usage: /me <action>");
     } else if (starts(cmd, "part")) {
         irc_part();
     } else if (starts(cmd, "quit")) {
@@ -183,6 +185,7 @@ static void do_command(char *line) {
         irc_local("  /join #channel         - join (opens a window)");
         irc_local("  /query <nick>          - open a private window");
         irc_local("  /msg <target> <text>   - send a private message");
+        irc_local("  /me <action>           - send an action (* you ...)");
         irc_local("  /part                  - leave current channel");
         irc_local("  /quit                  - disconnect");
         irc_local("  /raw <text>            - send a raw IRC line");

@@ -447,6 +447,19 @@ void irc_say(const char *text) {
     win_print((i8)wcur, out);
 }
 
+/* /me <action>: CTCP ACTION to the current window (mirrors received ACTION). */
+void irc_me(const char *text) {
+    if (wcur == 0 || !net_is_connected()) { term_notif("join a channel first (/join #chan)"); return; }
+    {
+        const char *sendtext = text;
+        if (enc_on) { cp866_to_utf8(text, sendbuf, sizeof(sendbuf)); sendtext = sendbuf; }
+        net_send("PRIVMSG "); net_send(win[wcur].name); net_send(" :\001ACTION ");
+        net_send(sendtext); net_send("\001\r\n");
+    }
+    o_init(); o_str("* "); o_str(mynick); o_c(' '); o_str(text); o_end();   /* local echo (CP866) */
+    win_print((i8)wcur, out);
+}
+
 /* /query <nick>: open (or switch to) an empty query window for nick. */
 void irc_query(const char *nick) {
     i8 w;
