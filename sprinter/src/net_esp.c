@@ -4,12 +4,13 @@
  * mode (CIPMUX=0, CIPMODE=1). Assumes NETUP already brought Wi-Fi up.
  */
 #include "net.h"
-#include "netcfg.h"
 #include "isauart.h"
 #include "uart.h"
 
 static u8 connected;
 static u8 scratch[256];
+static char g_baud[8];      /* NET.CFG BAUD as parsed (diagnostic) */
+static u8   g_div;          /* divisor actually applied */
 
 /* ~n seconds of silence (no TX), draining/discarding RX — guard for "+++". */
 static void quiet(u8 n) {
@@ -39,15 +40,34 @@ static void esp_reset(void) {
     at("AT+CIPCLOSE", 1);
 }
 
+/* case-insensitive equality */
+static u8 ci_eq(const char *a, const char *b) {
+    while (*a && *b) {
+        u8 ca = (*a >= 'a' && *a <= 'z') ? (u8)(*a - 32) : (u8)*a;
+        u8 cb = (*b >= 'a' && *b <= 'z') ? (u8)(*b - 32) : (u8)*b;
+        if (ca != cb) return 0;
+        a++; b++;
+    }
+    return *a == *b;
+}
+
 i8 net_init(void) {
-    netcfg_t cfg;
+    char v[12];
     connected = 0;
+    /* The SprinterWiFi kit (NETUP) publishes the live network state in DSS env
+     * vars; NET=WIFI marks the link is up. Read NET_BAUD for the actual baud
+     * NETUP applied (no NET.CFG parsing needed). */
+    if (dss_getenv("NET", v) != 0 || !ci_eq(v, "WIFI")) return NET_NO_LINK;
     if (!uart_probe()) return NET_NO_HW;
-    netcfg_load(&cfg);
-    uart_init(uart_divisor(cfg.baud));
+    if (dss_getenv("NET_BAUD", g_baud) != 0) g_baud[0] = 0;
+    g_div = uart_divisor(g_baud);
+    uart_init(g_div);
     esp_reset();
     return NET_OK;
 }
+
+const char *net_cfg_baud(void) { return g_baud; }
+u8 net_cfg_div(void) { return g_div; }
 
 i8 net_connect(const char *host, const char *port) {
     esp_reset();

@@ -11,7 +11,8 @@
 
 #include <sprinter.h>
 
-#define NET_NO_HW   -1
+#define NET_NO_HW   -1     /* no TL16C550 UART present */
+#define NET_NO_LINK -2     /* Wi-Fi not up (NETUP not run): env NET != WIFI */
 #define NET_OK       0
 
 i8   net_init(void);                                  /* probe+init UART, ESP to cmd mode; NET_NO_HW if absent */
@@ -20,5 +21,7 @@ void net_send(const char *s);                         /* send raw bytes (NUL-ter
 u16  net_poll(u8 *buf, u16 max);                       /* non-blocking: bytes available now */
 void net_close(void);                                  /* escape transparent mode, close socket */
 u8   net_is_connected(void);
+const char *net_cfg_baud(void);   /* parsed NET.CFG BAUD (diagnostic) */
+u8   net_cfg_div(void);            /* UART divisor actually applied */
 
 #endif /* NET_H */

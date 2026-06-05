@@ -49,8 +49,11 @@ void term_banner(const char *title) {
 }
 
 void term_clock(void) {
+    static u8 last = 0xFF;
     dss_time_t t;
     dss_gettime(&t);
+    if (t.second == last) return;          /* redraw only when the second changes */
+    last = t.second;
     dss_gotoxy(SCR_W - 8, BANNER_ROW);
     put2(t.hour); dss_putchar(':');
     put2(t.minute); dss_putchar(':');

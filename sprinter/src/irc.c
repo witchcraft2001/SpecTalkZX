@@ -292,7 +292,13 @@ static void h_numeric(u16 n, const char *txt) {
         win_print(0, out);
         status_refresh();
     } else {
-        win_print(0, *txt ? txt : "(numeric)");        /* server window */
+        /* generic numeric: show params (skip arg[0]=our nick) + trailing text */
+        u8 k;
+        o_init();
+        for (k = 1; k < argc; k++) { o_str(arg(k)); o_c(' '); }
+        o_str(txt);
+        o_end();
+        win_print(0, (out[0]) ? out : "(numeric)");
     }
 }
 

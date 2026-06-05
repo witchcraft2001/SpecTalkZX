@@ -210,12 +210,35 @@ void main(void) {
     eh_init();
     for (i = 0; i < IN_MAX; i++) inbuf[i] = 0;
 
-    if (net_init() == NET_NO_HW) {
-        irc_local("No SprinterWiFi (ESP) UART detected.");
-        irc_local("UI works, networking unavailable.");
-    } else {
-        irc_local("ESP ready. Run NETUP first if Wi-Fi is not up.");
+    {
+        i8 nr = net_init();
+        if (nr == NET_NO_LINK) {            /* NETUP not run -> message and exit */
+            dss_clrscr();
+            dss_gotoxy(1, 1);
+            dss_puts("SpecTalk ZX  --  Sprinter\r\n\r\n");
+            dss_puts("Wi-Fi is not up (env NET != WIFI).\r\n");
+            dss_puts("Run NETUP first to bring the network up,\r\n");
+            dss_puts("then start SpecTalk again.\r\n\r\n");
+            dss_puts("Press any key to exit.\r\n");
+            dss_waitkey();
+            dss_exit(1);
+        }
+        if (nr == NET_NO_HW) {
+            irc_local("No SprinterWiFi (ESP) UART detected.");
+            irc_local("UI works, networking unavailable.");
+        } else {
+        char m[40], *o = m;
+        const char *p = "ESP ready. UART baud=";
+        const char *b = net_cfg_baud();
+        u8 d = net_cfg_div();
+        while (*p) *o++ = *p++;
+        if (*b) { while (*b) *o++ = *b++; } else { *o++ = '('; *o++ = 'd'; *o++ = 'e'; *o++ = 'f'; *o++ = ')'; }
+        *o++ = ' '; *o++ = 'd'; *o++ = 'i'; *o++ = 'v'; *o++ = '=';
+        *o++ = (char)('0' + (d / 100) % 10); *o++ = (char)('0' + (d / 10) % 10); *o++ = (char)('0' + d % 10);
+        *o = 0;
+        irc_local(m);
         irc_local("/help for commands.");
+        }
     }
 
     if (S.loaded && S.server[0]) {           /* offer the last server via history */
@@ -234,10 +257,10 @@ void main(void) {
     redraw();
 
     for (;;) {
-        term_clock();
-
-        n = net_poll(rxb, sizeof(rxb));
+        n = net_poll(rxb, sizeof(rxb));   /* drain UART first, before slower work */
         if (n) irc_feed(rxb, n);
+
+        term_clock();
 
         if (dss_testkey(&key)) {
             dss_scankey(&consume);
