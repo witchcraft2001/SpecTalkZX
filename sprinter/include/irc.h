@@ -42,6 +42,11 @@ void irc_prev_window(void);
 void irc_scroll_up(void);     /* PgUp: older history in the current window */
 void irc_scroll_down(void);   /* PgDn: newer history / back to live */
 
+/* NickServ */
+void irc_identify(const char *pass);     /* PRIVMSG NickServ :IDENTIFY (empty = stored pass) */
+void irc_set_nspass(const char *p);      /* store NickServ password (for cfg + auto-id) */
+const char *irc_nspass(void);            /* stored password (for saving to cfg) */
+
 void irc_toggle_ts(void);            /* toggle message timestamps */
 void irc_toggle_encoding(void);      /* toggle UTF-8 <-> CP866 recoding */
 void irc_ignore(const char *nick);   /* toggle ignoring a nick (empty = list) */

@@ -110,6 +110,7 @@ static void eh_load(u8 logical) {
 
 static void save_settings(void) {
     s_cpy(S.nick, irc_nick_str(), sizeof(S.nick));
+    s_cpy(S.nspass, irc_nspass(), sizeof(S.nspass));
     cfg_save(&S);
 }
 
@@ -162,6 +163,13 @@ static void do_command(char *line) {
         irc_msg(target, text);
     } else if (starts(cmd, "me")) {
         if (arg[0]) irc_me(arg); else term_notif("usage: /me <action>");
+    } else if (starts(cmd, "id")) {                 /* identify with NickServ */
+        if (arg[0]) { irc_set_nspass(arg); save_settings(); }
+        irc_identify(arg);
+    } else if (starts(cmd, "pass")) {               /* set/show/clear NickServ password */
+        if (!arg[0]) term_notif(irc_nspass()[0] ? "NickServ password: set" : "NickServ password: not set");
+        else if (starts(arg, "clear") || starts(arg, "none")) { irc_set_nspass(""); save_settings(); term_notif("password cleared"); }
+        else { irc_set_nspass(arg); save_settings(); term_notif("password saved (auto-identify on)"); }
     } else if (starts(cmd, "part")) {
         irc_part();
     } else if (starts(cmd, "quit")) {
@@ -186,6 +194,8 @@ static void do_command(char *line) {
         irc_local("  /query <nick>          - open a private window");
         irc_local("  /msg <target> <text>   - send a private message");
         irc_local("  /me <action>           - send an action (* you ...)");
+        irc_local("  /pass <password>       - save NickServ pass (auto-identify)");
+        irc_local("  /id [password]         - identify with NickServ now");
         irc_local("  /part                  - leave current channel");
         irc_local("  /quit                  - disconnect");
         irc_local("  /raw <text>            - send a raw IRC line");
@@ -221,6 +231,7 @@ void main(void) {
     cfg_load(&S);
     if (!S.nick[0]) { gen_nick(S.nick); cfg_save(&S); }   /* unique default nick, persisted */
     irc_init(S.nick);
+    irc_set_nspass(S.nspass);                             /* enable NickServ auto-identify */
 
     inlen = 0; incur = 0;
     eh_init();

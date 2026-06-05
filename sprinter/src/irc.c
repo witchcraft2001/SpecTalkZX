@@ -34,6 +34,8 @@ static u8     enc_on = 1;                /* UTF-8 <-> CP866 recoding (public cha
 static char   ign[MAX_IGN][20];          /* ignored nicks */
 static char   tsbuf[488];                /* "[HH:MM] " + line */
 static char   sendbuf[816];              /* CP866->UTF-8 expansion for outgoing text */
+static char   nspass[32];                /* NickServ password (persisted in cfg) */
+static u8     ns_done;                   /* auto-identify fired this connection */
 
 /* ---- string helpers ------------------------------------------------ */
 static u8 lc(u8 c) { return (c >= 'A' && c <= 'Z') ? (u8)(c + 32) : c; }
@@ -193,6 +195,16 @@ static void h_privmsg(const char *usr, char *target, char *txt, u8 is_notice) {
     if (!*target || !*txt) return;
     if (is_ignored(usr)) return;
     if (txt[0] == 1) { handle_ctcp(usr, target, txt + 1); return; }
+
+    /* Auto-IDENTIFY: a NickServ-like service asking us to identify. Only fire if
+     * a password is stored, the sender looks like a *Serv (not a random user, so
+     * we never leak the password), and once per connection. */
+    if (nspass[0] && !ns_done && is_notice && target[0] != '#' && target[0] != '&'
+        && istr(usr, "serv") && istr(txt, "identify")) {
+        ns_done = 1;
+        irc_identify(nspass);
+        return;
+    }
 
     /* server NOTICEs (sender is a server host, or target '*'/'AUTH') -> server window */
     if (is_notice && (target[0] == '*' || has_dot(usr)))
@@ -396,6 +408,7 @@ void irc_init(const char *nick) {
 }
 
 static void irc_register(void) {
+    ns_done = 0;                 /* allow auto-identify once on this connection */
     net_send("NICK "); net_send(mynick); net_send("\r\n");
     net_send("USER spectalk 0 * :SpecTalk ZX Sprinter\r\n");
 }
@@ -445,6 +458,20 @@ void irc_say(const char *text) {
     }
     o_init(); o_c('<'); o_str(mynick); o_str("> "); o_str(text); o_end();   /* echo as typed (CP866) */
     win_print((i8)wcur, out);
+}
+
+/* ---- NickServ ------------------------------------------------------ */
+void irc_set_nspass(const char *p) { s_cpy(nspass, p ? p : "", sizeof(nspass)); }
+const char *irc_nspass(void) { return nspass; }
+
+/* Send NickServ IDENTIFY. pass NULL/empty -> use the stored password. */
+void irc_identify(const char *pass) {
+    if (!pass || !pass[0]) pass = nspass;
+    if (!pass[0]) { term_notif("no password (use /pass <password> first)"); return; }
+    if (!net_is_connected()) { term_notif("not connected"); return; }
+    net_send("PRIVMSG NickServ :IDENTIFY "); net_send(pass); net_send("\r\n");
+    ns_done = 1;
+    win_print(0, "* identifying with NickServ...");
 }
 
 /* /me <action>: CTCP ACTION to the current window (mirrors received ACTION). */

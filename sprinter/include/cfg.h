@@ -14,6 +14,7 @@ typedef struct {
     char server[40];
     char port[8];
     char nick[20];
+    char nspass[32];   /* NickServ password (stored plaintext; see cfg.c) */
     u8   loaded;       /* 1 if SPECTALK.CFG was read */
 } settings_t;
 

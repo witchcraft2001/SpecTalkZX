@@ -41,6 +41,7 @@ i8 cfg_load(settings_t *c) {
                 if (key_eq(start, "SERVER")) s_cpy(c->server, eq + 1, sizeof(c->server));
                 else if (key_eq(start, "PORT")) s_cpy(c->port, eq + 1, sizeof(c->port));
                 else if (key_eq(start, "NICK")) s_cpy(c->nick, eq + 1, sizeof(c->nick));
+                else if (key_eq(start, "NICKPASS")) s_cpy(c->nspass, eq + 1, sizeof(c->nspass));
             }
         }
         while (*s == '\r' || *s == '\n') s++;
@@ -65,6 +66,7 @@ i8 cfg_save(const settings_t *c) {
     put(buf, &pos, "SERVER", c->server);
     put(buf, &pos, "PORT", c->port);
     put(buf, &pos, "NICK", c->nick);
+    put(buf, &pos, "NICKPASS", c->nspass);
     fd = dss_creat(CFG_PATH);
     if (fd < 0) return -1;
     w = dss_write((u8)fd, buf, pos);
