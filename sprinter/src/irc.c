@@ -7,6 +7,7 @@
 #include "term.h"
 #include "net.h"
 #include "hist.h"
+#include "recode.h"
 
 #define WIN_NAME  24
 #define F_ACTIVE  0x01
@@ -29,8 +30,10 @@ static u8     wcur;
 static char   mynick[20];
 static u8     registered;
 static u8     ts_on = 1;                 /* timestamp messages */
+static u8     enc_on = 1;                /* UTF-8 <-> CP866 recoding (public channels) */
 static char   ign[MAX_IGN][20];          /* ignored nicks */
 static char   tsbuf[488];                /* "[HH:MM] " + line */
+static char   sendbuf[816];              /* CP866->UTF-8 expansion for outgoing text */
 
 /* ---- string helpers ------------------------------------------------ */
 static u8 lc(u8 c) { return (c >= 'A' && c <= 'Z') ? (u8)(c + 32) : c; }
@@ -362,7 +365,12 @@ void irc_feed(const u8 *data, u16 n) {
     u16 i;
     for (i = 0; i < n; i++) {
         u8 c = data[i];
-        if (c == '\n') { asmbuf[asmpos] = 0; parse_line(asmbuf); asmpos = 0; }
+        if (c == '\n') {
+            asmbuf[asmpos] = 0;
+            if (enc_on) utf8_to_cp866(asmbuf);   /* incoming UTF-8 -> CP866 */
+            parse_line(asmbuf);
+            asmpos = 0;
+        }
         else if (c != '\r' && asmpos < sizeof(asmbuf) - 1) asmbuf[asmpos++] = (char)c;
     }
 }
@@ -416,8 +424,12 @@ void irc_part(void) {
 
 void irc_say(const char *text) {
     if (wcur == 0 || !net_is_connected()) { term_notif("join a channel first (/join #chan)"); return; }
-    net_send("PRIVMSG "); net_send(win[wcur].name); net_send(" :"); net_send(text); net_send("\r\n");
-    o_init(); o_c('<'); o_str(mynick); o_str("> "); o_str(text); o_end();
+    {
+        const char *sendtext = text;
+        if (enc_on) { cp866_to_utf8(text, sendbuf, sizeof(sendbuf)); sendtext = sendbuf; }
+        net_send("PRIVMSG "); net_send(win[wcur].name); net_send(" :"); net_send(sendtext); net_send("\r\n");
+    }
+    o_init(); o_c('<'); o_str(mynick); o_str("> "); o_str(text); o_end();   /* echo as typed (CP866) */
     win_print((i8)wcur, out);
 }
 
@@ -427,6 +439,11 @@ void irc_scroll_down(void) { hist_scroll(wcur, 1); }
 void irc_toggle_ts(void) {
     ts_on = !ts_on;
     irc_local(ts_on ? "* timestamps on" : "* timestamps off");
+}
+
+void irc_toggle_encoding(void) {
+    enc_on = !enc_on;
+    irc_local(enc_on ? "* encoding: UTF-8 <-> CP866" : "* encoding: raw (no recoding)");
 }
 
 void irc_ignore(const char *nick) {
@@ -449,6 +466,14 @@ void irc_away(const char *msg) {
 }
 
 void irc_raw(const char *line) { net_send(line); net_send("\r\n"); }
+
+/* forward an unrecognized "/cmd args" to the server as a raw IRC command */
+void irc_send_cmd(const char *cmd, const char *arg) {
+    if (!net_is_connected()) { term_notif("not connected"); return; }
+    net_send(cmd);
+    if (arg[0]) { net_send(" "); net_send(arg); }
+    net_send("\r\n");
+}
 
 void irc_quit(void) {
     if (net_is_connected()) { net_send("QUIT :SpecTalk ZX\r\n"); net_close(); }

@@ -168,6 +168,8 @@ static void do_command(char *line) {
         irc_away(arg);
     } else if (starts(cmd, "timestamp") || starts(cmd, "ts")) {
         irc_toggle_ts();
+    } else if (starts(cmd, "encoding") || starts(cmd, "enc")) {
+        irc_toggle_encoding();
     } else if (starts(cmd, "help")) {
         irc_local("Commands:");
         irc_local("  /server <host> [port]  - connect (default 6667)");
@@ -179,10 +181,12 @@ static void do_command(char *line) {
         irc_local("  /ignore <nick>         - toggle ignoring a nick");
         irc_local("  /away [message]        - set/clear away");
         irc_local("  /timestamp (/ts)       - toggle message timestamps");
+        irc_local("  /encoding (/enc)       - toggle UTF-8 <-> CP866");
+        irc_local("  /whois /list /names... - any other /cmd is sent to the server");
         irc_local("  text                   - message current window");
         irc_local("  TAB window, arrows/Home/End edit, Up/Down hist, PgUp/PgDn scroll");
     } else {
-        term_notif("unknown command (try /help)");
+        irc_send_cmd(cmd, arg);   /* forward unknown /cmd to the server (/whois, /list, ...) */
     }
 }
 

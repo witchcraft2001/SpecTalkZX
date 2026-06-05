@@ -29,6 +29,7 @@ void irc_join(const char *chan);
 void irc_part(void);
 void irc_say(const char *text);            /* PRIVMSG to current window */
 void irc_raw(const char *line);
+void irc_send_cmd(const char *cmd, const char *arg);   /* forward "CMD args" to server */
 void irc_quit(void);
 
 /* window navigation */
@@ -38,6 +39,7 @@ void irc_scroll_up(void);     /* PgUp: older history in the current window */
 void irc_scroll_down(void);   /* PgDn: newer history / back to live */
 
 void irc_toggle_ts(void);            /* toggle message timestamps */
+void irc_toggle_encoding(void);      /* toggle UTF-8 <-> CP866 recoding */
 void irc_ignore(const char *nick);   /* toggle ignoring a nick (empty = list) */
 void irc_away(const char *msg);      /* set away (empty = back) */
 
