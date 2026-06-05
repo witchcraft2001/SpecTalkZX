@@ -68,6 +68,26 @@ void term_clear_chat(void) {
     clear_rect(1, CHAT_TOP, SCR_W, CHAT_H, ATTR_NORMAL);
 }
 
+/* Scroll the chat region up one line via BIOS #8A (LP_SCROLL_UD).
+ * Per the BIOS source: B=direction(1=up), D=TOP row (0-based), E=row COUNT.
+ * The routine remaps VRAM pages and does NOT disable interrupts itself, so we
+ * wrap it in di/ei. Bottom row is left for the caller to redraw.
+ * Keep D/E in sync with term.h: CHAT_TOP=2 (0-based 1), CHAT_H=28. */
+void term_scroll_chat(void) __naked {
+    __asm
+        push    ix
+        di
+        ld      b, #0x01        ; up
+        ld      d, #0x01        ; top row, 0-based = CHAT_TOP-1
+        ld      e, #0x1C        ; CHAT_H = 28 rows
+        ld      c, #0x8A        ; BIOS LP_SCROLL_UD
+        rst     #0x08
+        ei
+        pop     ix
+        ret
+    __endasm;
+}
+
 void term_status(const char *s) {
     clear_row(STATUS_ROW, ATTR_STATUS);
     put_clip(2, STATUS_ROW, s);

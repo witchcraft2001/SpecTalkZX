@@ -16,6 +16,7 @@ typedef struct {
     u16 lines;      /* lines currently stored (0..NSLOTS) */
     u16 first;      /* ring index of the oldest line */
     i16 view;       /* top visible logical line, or -1 = live (bottom) */
+    u8  shown;      /* rows currently drawn (for incremental live append) */
 } Hist;
 
 static Hist H[MAX_WIN];
@@ -61,6 +62,7 @@ void hist_open(u8 idx) {
     H[idx].lines = 0;
     H[idx].first = 0;
     H[idx].view = -1;
+    H[idx].shown = 0;
 }
 
 void hist_close(u8 idx) {
@@ -74,8 +76,8 @@ u8 hist_is_live(u8 idx) { return H[idx].view < 0; }
 static void render(u8 idx) {
     Hist *h = &H[idx];
     u16 top, li;
-    u8 r;
-    if (h->page == NO_PAGE) { term_clear_chat(); return; }
+    u8 r, drawn = 0;
+    if (h->page == NO_PAGE) { term_clear_chat(); h->shown = 0; return; }
     top = (h->view < 0) ? ((h->lines > CHAT_H) ? (u16)(h->lines - CHAT_H) : 0) : (u16)h->view;
     for (r = 0; r < CHAT_H; r++) {
         li = top + r;
@@ -83,13 +85,23 @@ static void render(u8 idx) {
             dss_setwin(3, h->page);                     /* map page -> WIN3 */
             slot_to_tmp((u16)((h->first + li) % NSLOTS)); /* copy to WIN2 before any DSS call */
             term_draw_row(r, tmp);
+            drawn = (u8)(r + 1);
         } else {
             term_draw_row(r, "");
         }
     }
+    h->shown = (h->view < 0) ? drawn : CHAT_H;
 }
 
-/* word-wrap line into <=WRAP chunks, store each; if show, repaint the view */
+/* draw one new live line incrementally (scroll up if the area is full) */
+static void live_append(u8 idx, const char *s) {
+    Hist *h = &H[idx];
+    if (h->view >= 0) return;                /* scrolled back: stored only, don't disturb */
+    if (h->shown < CHAT_H) { term_draw_row(h->shown, s); h->shown++; }
+    else { term_scroll_chat(); term_draw_row(CHAT_H - 1, s); }
+}
+
+/* word-wrap line into <=WRAP chunks, store each; if show, append each live */
 void hist_add(u8 idx, const char *line, u8 show) {
     char chunk[WRAP + 1];
     const char *s = line;
@@ -97,18 +109,18 @@ void hist_add(u8 idx, const char *line, u8 show) {
     for (;;) {
         i = 0;
         while (s[i] && i < WRAP) i++;
-        if (s[i] == 0) { store_chunk(idx, s); break; }   /* fits on one row */
+        if (s[i] == 0) { store_chunk(idx, s); if (show) live_append(idx, s); break; }
         brk = WRAP;
         while (brk > 0 && s[brk] != ' ') brk--;
         if (brk == 0) brk = WRAP;
         for (i = 0; i < brk; i++) chunk[i] = s[i];
         chunk[i] = 0;
         store_chunk(idx, chunk);
+        if (show) live_append(idx, chunk);
         s += brk;
         while (*s == ' ') s++;
         if (*s == 0) break;
     }
-    if (show) render(idx);
 }
 
 void hist_feed_tail(u8 idx) { H[idx].view = -1; render(idx); }

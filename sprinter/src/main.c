@@ -248,7 +248,11 @@ void main(void) {
                 continue;
             }
             if (key.ascii == K_ESC) { quit_pending = 1; term_notif("Press ESC again to quit, any other key to cancel"); }
-            else if (key.ascii == K_TAB) { irc_next_window(); redraw(); }
+            else if (key.ascii == K_TAB || key.scan == 0x0F) {   /* Tab / Shift+Tab */
+                if (key.modifiers & (DSS_KEYMOD_LSHIFT | DSS_KEYMOD_RSHIFT)) irc_prev_window();
+                else irc_next_window();
+                redraw();
+            }
             else if (key.ascii == K_ENTER) { on_enter(); redraw(); }
             else if (key.ascii == K_BS) { del_before(); redraw(); }
             else if (key.scan == SC_LEFT)  { if (incur > 0) { incur--; redraw(); } }
