@@ -154,6 +154,12 @@ static void do_command(char *line) {
         if (arg[0]) { irc_set_nick(arg); save_settings(); }
     } else if (starts(cmd, "join")) {
         if (arg[0]) irc_join(arg);
+    } else if (starts(cmd, "query")) {
+        if (arg[0]) irc_query(arg); else term_notif("usage: /query <nick>");
+    } else if (starts(cmd, "msg")) {
+        char *target = arg, *text = next_arg(arg);
+        if (!target[0] || !text[0]) { term_notif("usage: /msg <target> <text>"); return; }
+        irc_msg(target, text);
     } else if (starts(cmd, "part")) {
         irc_part();
     } else if (starts(cmd, "quit")) {
@@ -175,6 +181,8 @@ static void do_command(char *line) {
         irc_local("  /server <host> [port]  - connect (default 6667)");
         irc_local("  /nick <name>           - change nick");
         irc_local("  /join #channel         - join (opens a window)");
+        irc_local("  /query <nick>          - open a private window");
+        irc_local("  /msg <target> <text>   - send a private message");
         irc_local("  /part                  - leave current channel");
         irc_local("  /quit                  - disconnect");
         irc_local("  /raw <text>            - send a raw IRC line");

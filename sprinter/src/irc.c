@@ -447,6 +447,42 @@ void irc_say(const char *text) {
     win_print((i8)wcur, out);
 }
 
+/* /query <nick>: open (or switch to) an empty query window for nick. */
+void irc_query(const char *nick) {
+    i8 w;
+    if (!nick[0]) return;
+    if (!net_is_connected()) { term_notif("not connected"); return; }
+    w = win_find(nick);
+    if (w < 0) w = win_add(nick, F_QUERY);
+    if (w < 0) { win_print(0, "* cannot open window (max reached)"); return; }
+    win_switch((u8)w);
+}
+
+/* /msg <target> <text>: send a PRIVMSG to an arbitrary target (nick or channel).
+ * Mirrors the original: a nick target auto-opens its query window; the message
+ * is echoed into the target's window (the correct place for history), with a
+ * notif if that window isn't the current one so the sender still gets feedback. */
+void irc_msg(const char *target, const char *text) {
+    i8 w;
+    if (!target[0] || !text[0]) return;
+    if (!net_is_connected()) { term_notif("not connected"); return; }
+    {
+        const char *sendtext = text;
+        if (enc_on) { cp866_to_utf8(text, sendbuf, sizeof(sendbuf)); sendtext = sendbuf; }
+        net_send("PRIVMSG "); net_send(target); net_send(" :"); net_send(sendtext); net_send("\r\n");
+    }
+    if (target[0] == '#' || target[0] == '&') {
+        w = win_find(target);
+    } else {
+        w = win_find(target);
+        if (w < 0) w = win_add(target, F_QUERY);
+    }
+    if (w < 0) w = 0;
+    o_init(); o_c('<'); o_str(mynick); o_str("> "); o_str(text); o_end();   /* echo as typed (CP866) */
+    win_print(w, out);
+    if ((u8)w != wcur) { o_init(); o_str("-> "); o_str(target); o_end(); term_notif(out); }
+}
+
 void irc_scroll_up(void)   { hist_scroll(wcur, -1); }
 void irc_scroll_down(void) { hist_scroll(wcur, 1); }
 

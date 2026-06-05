@@ -29,6 +29,8 @@ void irc_local(const char *line);          /* show a local note in the current w
 void irc_join(const char *chan);
 void irc_part(void);
 void irc_say(const char *text);            /* PRIVMSG to current window */
+void irc_query(const char *nick);          /* open/switch to a query window */
+void irc_msg(const char *target, const char *text);  /* PRIVMSG to an arbitrary target */
 void irc_raw(const char *line);
 void irc_send_cmd(const char *cmd, const char *arg);   /* forward "CMD args" to server */
 void irc_quit(void);
