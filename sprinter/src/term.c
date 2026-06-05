@@ -60,10 +60,31 @@ void term_clock(void) {
     put2(t.second);
 }
 
-/* draw one chat row (0..CHAT_H-1): one clear + one PCHARS syscall */
+/* Per-nick colour: hash the nick to a readable ink on black paper. */
+static u8 nick_attr(const char *a, const char *b) {
+    static const u8 pal[] = { 0x0A, 0x0E, 0x0D, 0x0B, 0x0C, 0x09, 0x06, 0x0F };
+    u16 h = 0;
+    while (a < b) { h = (u16)(h * 31u + (u8)*a); a++; }
+    return pal[h & 7];
+}
+
+/* draw one chat row (0..CHAT_H-1): clear, recolour the nick span, print line.
+ * dss_puts writes chars but not attributes, so we pre-set the nick cells' colour
+ * and the text drops onto them. Nick = leading "<nick>" or "-nick-" (after an
+ * optional "[HH:MM] " timestamp); everything else stays ATTR_NORMAL. */
 void term_draw_row(u8 r, const char *s) {
-    clear_rect(1, CHAT_TOP + r, SCR_W, 1, ATTR_NORMAL);
-    dss_gotoxy(1, CHAT_TOP + r);
+    u8 y = CHAT_TOP + r;
+    const char *q = s, *a = 0, *b = 0;
+    if (s[0] == '[' && s[6] == ']' && s[7] == ' ') q = s + 8;   /* skip timestamp */
+    if (q[0] == '<')      { a = q + 1; b = a; while (*b && *b != '>') b++; }
+    else if (q[0] == '-') { a = q + 1; b = a; while (*b && *b != '-') b++; }
+
+    clear_rect(1, y, SCR_W, 1, ATTR_NORMAL);
+    if (a && b > a && *b) {
+        u8 x0 = (u8)(1 + (a - s)), len = (u8)(b - a);
+        if (x0 >= 1 && (u16)x0 + len <= SCR_W) clear_rect(x0, y, len, 1, nick_attr(a, b));
+    }
+    dss_gotoxy(1, y);
     dss_puts(s);
 }
 
