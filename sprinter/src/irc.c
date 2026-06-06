@@ -4,6 +4,7 @@
  * Sprinter HAL (term_*) and transport (net_*).
  */
 #include "irc.h"
+#include "version.h"
 #include "term.h"
 #include "net.h"
 #include "hist.h"
@@ -59,7 +60,7 @@ static void o_end(void) { *ob = 0; }
 
 /* ---- windows ------------------------------------------------------- */
 static void banner_refresh(void) {
-    o_init(); o_str("SpecTalk ZX  ::  "); o_str(win[wcur].name); o_end();
+    o_init(); o_str(APP_TITLE); o_str("  ::  "); o_str(win[wcur].name); o_end();
     term_banner(out);
 }
 
@@ -182,7 +183,7 @@ static void handle_ctcp(const char *usr, const char *target, char *c) {
         o_init(); o_str("* "); o_str(usr); o_c(' '); o_str(c + 7); o_end();
         win_print(route_win(usr, target), out);
     } else if (seq(c, "VERSION")) {
-        net_send("NOTICE "); net_send(usr); net_send(" :\001VERSION SpecTalk ZX Sprinter\001\r\n");
+        net_send("NOTICE "); net_send(usr); net_send(" :\001VERSION " APP_TITLE " (Sprinter)\001\r\n");
     } else if (seq(c, "PING")) {
         net_send("NOTICE "); net_send(usr); net_send(" :\001PING"); net_send(c + 4); net_send("\001\r\n");
     }
@@ -410,7 +411,7 @@ void irc_init(const char *nick) {
 static void irc_register(void) {
     ns_done = 0;                 /* allow auto-identify once on this connection */
     net_send("NICK "); net_send(mynick); net_send("\r\n");
-    net_send("USER spectalk 0 * :SpecTalk ZX Sprinter\r\n");
+    net_send("USER sprintalk 0 * :" APP_TITLE "\r\n");
 }
 
 i8 irc_connect(const char *host, const char *port) {
@@ -566,7 +567,7 @@ void irc_send_cmd(const char *cmd, const char *arg) {
 }
 
 void irc_quit(void) {
-    if (net_is_connected()) { net_send("QUIT :SpecTalk ZX\r\n"); net_close(); }
+    if (net_is_connected()) { net_send("QUIT :" APP_TITLE "\r\n"); net_close(); }
     status_refresh();
 }
 

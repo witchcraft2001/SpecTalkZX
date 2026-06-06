@@ -48,8 +48,13 @@ idiomatic Sprinter-SDK C. Track and remove:
 - [x] Persist user settings to SPECTALK.CFG (current dir): last server/port/nick.
       On startup: set the nick, seed the input history with `/server <last> <port>`
       (Up recalls it), and show a hint. Saved on /server and /nick.
-      TODO extend: nickpass, autoconnect, theme, toggles (original config keys);
-      option to store in %NET_DIR%; fall back gracefully if medium is read-only.
+      TODO extend: nickpass (done), autoconnect, theme, toggles (original config
+      keys); option to store in %NET_DIR%; fall back gracefully if read-only.
+- [ ] Multi-server history: SPTALK.CFG currently keeps only the LAST server/port.
+      Save a list of all servers connected to (e.g. SERVER1=/SERVER2=… or a
+      [servers] block) and let the user pick/recall any of them (Up cycles through
+      them, or a small picker). Keep "last" as the default. Optional: per-server
+      port and autojoin channels.
 - [ ] Per-window paged history (NEXT): a DSS page per window (Dss.GetMem, up to
       16 KB), append all messages, restore last lines on switch, PgUp/PgDn to
       scroll. Uses the WIN3-map + copy-to-WIN2-before-DSS discipline.

@@ -10,6 +10,7 @@
  * Copyright (C) 2026 M. Ignacio Monge Garcia — GPLv2 (see ../../LICENSE)
  */
 
+#include "version.h"
 #include "term.h"
 #include "net.h"
 #include "irc.h"
@@ -242,10 +243,10 @@ void main(void) {
         if (nr == NET_NO_LINK) {            /* NETUP not run -> message and exit */
             dss_clrscr();
             dss_gotoxy(1, 1);
-            dss_puts("SpecTalk ZX  --  Sprinter\r\n\r\n");
+            dss_puts(APP_TITLE "\r\n\r\n");
             dss_puts("Wi-Fi is not up (env NET != WIFI).\r\n");
             dss_puts("Run NETUP first to bring the network up,\r\n");
-            dss_puts("then start SpecTalk again.\r\n\r\n");
+            dss_puts("then start " APP_NAME " again.\r\n\r\n");
             dss_puts("Press any key to exit.\r\n");
             dss_waitkey();
             dss_exit(1);
@@ -326,6 +327,6 @@ void main(void) {
     if (irc_connected()) { term_notif("disconnecting, please wait..."); irc_quit(); }
     dss_clrscr();
     dss_gotoxy(1, 1);
-    dss_puts("SpecTalk Sprinter - bye.\r\n");
+    dss_puts(APP_NAME " - bye.\r\n");
     dss_exit(0);
 }

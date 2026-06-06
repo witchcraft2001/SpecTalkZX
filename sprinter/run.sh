@@ -1,13 +1,13 @@
 #!/bin/sh
 # run.sh — boot the Sprinter MAME emulator with this project's floppy mounted.
-# Builds distr/spectalk.img first (via make deploy), then launches MAME with it
-# as flop2. At the DSS prompt, switch to the floppy drive and run SPECTALK.
+# Builds distr/sptalk.img first (via make deploy), then launches MAME with it
+# as flop2. At the DSS prompt, switch to the floppy drive and run SPTALK.
 
 set -e
 
 PROJ_DIR="$(cd "$(dirname "$0")" && pwd)"
 MAME_DIR="/Users/dmitry/dev/zx/sprinter/mame_images/mame_release_v306_25.05.2025"
-IMG="$PROJ_DIR/distr/spectalk.img"
+IMG="$PROJ_DIR/distr/sptalk.img"
 
 make -C "$PROJ_DIR" deploy
 

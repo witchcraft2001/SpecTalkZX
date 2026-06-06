@@ -1,80 +1,87 @@
-# SpecTalk ZX — Sprinter DSS port
+# SprinTalk 0.1
 
-Port of the ZX Spectrum IRC client to the Sprinter computer (DSS), built with the
-SDCC 4.5 Sprinter SDK. See `../plan.md` for the full plan and `../CLAUDE.md` for
-context. Work proceeds in verifiable stages; this directory is the Sprinter
-build, independent of the ZX `src/`/`asm/` tree.
+An IRC client for the **Sprinter** computer running **DSS**, in native 80x32
+text mode. It connects to IRC networks (e.g. Libera.Chat) over the network link
+brought up by the SprinterWiFi kit, and supports multiple channels and private
+chats, scrollback history, Cyrillic (CP866) with on-the-fly UTF-8 recoding, and
+NickServ identification.
 
-## Build
+- **Author:** Dmitry Mikhalchenkov (SprinterTeam)
+- **Based on:** the SpecTalk ZX sources (ZX Spectrum IRC client), ported and
+  largely rewritten for the Sprinter / DSS platform.
+- **Version:** 0.1
 
-```sh
-make            # -> SPECTALK.EXE (DSS executable, load/entry 0x4100)
-make deploy     # build EXE + write FAT12 floppy to distr/spectalk.img
-make clean
+## Network backend (ESP / RTL)
+
+SprinTalk is built for a specific network card; the build tag tells you which:
+
+- **ESP** — SprinterWiFi / ESP card over the serial (UART) port. *This is the
+  current release.* The title bar shows `SprinTalk 0.1 ESP`.
+- **RTL** — RTL8019 (NE2000) ISA Ethernet card. *Planned* — a separate `RTL`
+  build will use the same interface and commands.
+
+## What you need
+
+- A Sprinter with DSS and the SprinterWiFi (ESP) card set up.
+- `SPTALK.EXE` from the delivery package, copied onto your Sprinter (disk, CF/SD
+  card, hard drive — wherever you run programs from). `SPTALK.TXT` (this file) and
+  `SPTHOWTO.TXT` (the how-to) are documentation.
+- Network already brought up by **NETUP** (see below). SprinTalk reads the
+  connection settings published by NETUP, so it needs **no config file of its own**.
+
+## Quick start
+
+1. **Bring the network up first.** Run `NETUP` (from the SprinterWiFi kit) once.
+   It joins Wi-Fi and publishes the connection settings (including the serial
+   speed) to the system. SprinTalk reads those — if the network is not up it
+   prints *"Run NETUP first"* and exits.
+2. **Run `SPTALK`.** You start in the **server** window.
+3. **Connect:** type `/server <host>` — for example `/server irc.libera.chat`,
+   but any IRC server works — and press Enter. Wait for the welcome message.
+4. **Join a channel:** `/join #sprinter` (opens a new window).
+5. **Chat:** type a line and press Enter. Switch windows with **Tab**.
+6. **Quit:** press **Esc** (confirm with Esc again).
+
+On first run a random nick like `SprXXXX` is generated and saved. Your last
+server and nick are remembered in `SPTALK.CFG` for next time.
+
+## Common commands
+
+```
+/server <host> [port]   connect (default port 6667)
+/nick <name>            change your nick
+/join #channel          join a channel (new window)
+/query <nick>           open a private chat window
+/msg <target> <text>    send a private message
+/me <action>            send an action  (* you wave)
+/pass <password>        save NickServ password (auto-identify on connect)
+/id [password]          identify with NickServ now
+/encoding               toggle UTF-8 <-> CP866 recoding
+/timestamp              toggle [HH:MM] timestamps
+/part                   leave the current channel
+/quit                   disconnect
+/help                   list commands
 ```
 
-Override the SDK path if needed: `make SDK=/path/to/sdcc45-sprinter-sdk`.
-The build never writes into the SDK tree; the floppy image lives in `distr/`.
+Any other `/command` (e.g. `/whois`, `/names`, `/list`, `/topic`) is sent to the
+server as-is.
 
-## Verify in MAME
+## Keys
 
-```sh
-./run.sh        # make deploy + launch MAME with distr/spectalk.img as flop2
+```
+Tab / Shift+Tab   next / previous window
+PgUp / PgDn       scroll history up / down
+Up / Down         recall previous input lines
+Left/Right/Home/End   edit the input line
+Esc               quit (press twice)
 ```
 
-At the DSS prompt, switch to the floppy drive and run `SPECTALK`.
+See **SPTHOWTO.TXT** for a fuller walkthrough (channels, private messages,
+hiding your IP with a NickServ cloak, encoding, troubleshooting).
 
-## Verified platform facts (empirical, on MAME v3.06 / DSS)
+## Also in the package
 
-- DSS launches programs already in **80x32 text mode** — no `dss_setvmod` needed.
-- `dss_gotoxy(x, y)` is **1-based** (cols 1..80, rows 1..32).
-- **Keyboard:** `dss_scankey` (#31) returns a *raw key code* in `.ascii`, not ASCII.
-  For real ASCII use `dss_testkey` (#37) to peek (non-blocking, doesn't consume)
-  then `dss_scankey` to pop. `dss_kbhit` maps to CTRLKEY/#33 (modifier state),
-  **not** buffer state — don't use it for "key available".
-- Key codes (`.ascii`): **ENTER = 0x0D, BACKSPACE = 0x08, ESC = 0x1B, TAB = 0x09**.
-- Navigation keys carry no ASCII — identify them by `.scan`:
-  **← 0x54, → 0x56, ↑ 0x58, ↓ 0x52, Home 0x57, End 0x51, PgUp 0x59, PgDn 0x53, Tab 0x0F**.
-- **`dss_clear` / `dss_scroll` are 0-based**, but `dss_gotoxy` is **1-based**.
-  Pass `x-1, y-1` to clear/scroll to align with gotoxy coordinates.
-- `dss_clear(x, y, w, h, attr, fill)` sets both SYM (=fill char) and ATTR for the
-  region; text printed afterward keeps the region's ATTR (color).
-- **Memory: a program loaded at 0x4100 only owns WIN1 (0x4000-0x7FFF)** — the page
-  DSS maps for the code. WIN2 (0x8000+) / WIN3 are *foreign pages* unless
-  explicitly claimed via `Dss.GetMem` + `SetWin2/3`; the SDK default `--data-loc
-  0x8000` / stack `0xBFFF` puts data+stack on a foreign page and gets silently
-  corrupted by DSS/video. Fix: keep code+data+stack in WIN1 (`--data-loc 0x6000`,
-  stack `0x7FFF`). crt0 does NOT zero `_DATA` (only `_BSS`, which is empty here),
-  so explicitly init globals you read (or rely on write-before-read).
-- **Printing: use `dss_puts` (PCHARS #5C), not per-char `dss_putchar`** — one
-  syscall per line vs one per character (~80× fewer syscalls; per-char redraw of
-  the chat was the cause of multi-second startup).
-- **ESP bring-up model (verified on real HW):** the SprinterWiFi kit's `NETUP`
-  utility joins Wi-Fi (AT+CWMODE/CWJAP from NET.CFG, DHCP/DNS, sets UART baud) as
-  a one-time step. Apps (TCPTEST/PING/…) do NOT re-join — they init the local
-  UART at the NET.CFG baud and open TCP via `AT+CIPSTART`, assuming the link is
-  up. SpecTalk follows the same model: assume `NETUP` ran; do UART init +
-  AT+CIPSTART + data, not AT+CWJAP. On the test machine `%NET_DIR%=\WIFI\`, and
-  the TL16C550 UART probe returns PRESENT.
-- **Scrolling: DSS `#55` (SCROLL) wedges** on a full-width region (it calls BIOS
-  `#B7` internally; see `sprinter_dss/VIDEO.ASM`). The working approach (used by
-  `texteditor`) is **BIOS `#8A` (LP_SCROLL_UP) directly**: `B`=dir (1=up, 0=down),
-  `D`=start row, `E`=end row, wrap in `di`/`ei`. We currently use a RAM ring +
-  `dss_puts` redraw instead; BIOS `#8A` is the O(1) optimization for later.
-- **Cyrillic = CP866** (lowercase 'е' = 0xA5); the high range 0x80–0xFF is
-  printable and renders Cyrillic glyphs directly.
+- `SPTHOWTO.TXT` — the full how-to guide.
 
-## Stages
-
-1. **HAL smoke test** (done) — 80x32 text, border, clock, keyboard, clean exit.
-2. **Terminal HAL + chat layout** (done) — banner/chat/status/input, scrollback
-   ring + `dss_puts`, input editor (cursor move, history), colors. → `SPECTALK.EXE`.
-3. **net.cfg loader + ISA/UART diagnostics** (done) — reads `%NET_DIR%`/NET.CFG,
-   ISA open/close discipline, TL16C550 probe. → `NETDIAG.EXE`. Verified on real HW.
-4. **ESP TCP + IRC handshake** (done) — UART driver, ESP transparent mode
-   (CIPMUX=0/CIPMODE=1), TCP to irc.libera.chat, NICK/USER, auto-PONG, session
-   cleanup. → `NETIRC.EXE`. Verified on real HW: full Libera MOTD received.
-5. Port IRC engine + UI integration.
-5. IRC engine + UI integration.
-6. Feature parity.
-7. NE2000 backend + packaging.
+---
+SprinTalk is free software, provided as-is. Based on SpecTalk ZX.
