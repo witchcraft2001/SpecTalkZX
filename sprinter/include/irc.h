@@ -22,6 +22,7 @@ i8   irc_connect(const char *host, const char *port);  /* net_connect + register
 u8   irc_connected(void);
 void irc_on_disconnect(void);             /* main loop calls this when the link drops */
 void irc_net_warn(u8 on);                 /* show/clear an "ESP not responding" status marker */
+void irc_keepalive(void);                 /* call each loop: PING when idle, timeout if dead */
 
 /* user commands (called from the input layer) */
 void irc_set_nick(const char *n);
@@ -29,6 +30,7 @@ const char *irc_nick_str(void);            /* current nick (for saving settings)
 void irc_local(const char *line);          /* show a local note in the current window */
 void irc_join(const char *chan);
 void irc_part(void);
+void irc_close(void);                      /* close current window (PART if a channel) */
 void irc_say(const char *text);            /* PRIVMSG to current window */
 void irc_me(const char *text);             /* CTCP ACTION to current window */
 void irc_query(const char *nick);          /* open/switch to a query window */

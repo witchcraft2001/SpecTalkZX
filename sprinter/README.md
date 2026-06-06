@@ -60,6 +60,7 @@ to cycle through the recent `/server …` lines.
 /encoding               toggle UTF-8 <-> CP866 recoding
 /timestamp              toggle [HH:MM] timestamps
 /part                   leave the current channel
+/close                  close the current window (channel or private)
 /quit                   disconnect
 /help                   list commands
 ```

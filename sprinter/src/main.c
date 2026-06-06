@@ -170,6 +170,8 @@ static void do_command(char *line) {
         if (!arg[0]) term_notif(irc_nspass()[0] ? "NickServ password: set" : "NickServ password: not set");
         else if (starts(arg, "clear") || starts(arg, "none")) { irc_set_nspass(""); save_settings(); term_notif("password cleared"); }
         else { irc_set_nspass(arg); save_settings(); term_notif("password saved (auto-identify on)"); }
+    } else if (starts(cmd, "close")) {
+        irc_close();
     } else if (starts(cmd, "part")) {
         irc_part();
     } else if (starts(cmd, "quit")) {
@@ -197,6 +199,7 @@ static void do_command(char *line) {
         irc_local("  /pass <password>       - save NickServ pass (auto-identify)");
         irc_local("  /id [password]         - identify with NickServ now");
         irc_local("  /part                  - leave current channel");
+        irc_local("  /close                 - close current window (channel or query)");
         irc_local("  /quit                  - disconnect");
         irc_local("  /raw <text>            - send a raw IRC line");
         irc_local("  /ignore <nick>         - toggle ignoring a nick");
@@ -296,6 +299,7 @@ void main(void) {
             term_notif("Connection lost (server closed the link)");
         }
         was_conn = irc_connected();
+        irc_keepalive();                      /* PING when idle; drop a dead link after a timeout */
 
         if (net_stalled()) {                  /* a send couldn't drain: ESP wedged */
             irc_net_warn(1);

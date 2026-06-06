@@ -37,6 +37,12 @@ static char   tsbuf[488];                /* "[HH:MM] " + line */
 static char   sendbuf[816];              /* CP866->UTF-8 expansion for outgoing text */
 static char   nspass[32];                /* NickServ password (persisted in cfg) */
 static u8     ns_done;                   /* auto-identify fired this connection */
+static u16    idle_s;                    /* seconds since last RX (keepalive timer) */
+static u8     ka_pinged;                 /* keepalive PING already sent this idle period */
+static u8     link_up;                   /* link considered established (one-shot teardown) */
+
+#define KA_PING_S    150                 /* idle this long -> send a keepalive PING */
+#define KA_TIMEOUT_S 300                 /* idle this long with no reply -> link is dead */
 
 /* ---- string helpers ------------------------------------------------ */
 static u8 lc(u8 c) { return (c >= 'A' && c <= 'Z') ? (u8)(c + 32) : c; }
@@ -404,6 +410,7 @@ static char asmbuf[512];
 static u16  asmpos;
 void irc_feed(const u8 *data, u16 n) {
     u16 i;
+    if (n) { idle_s = 0; ka_pinged = 0; }    /* RX activity resets the keepalive timer */
     for (i = 0; i < n; i++) {
         u8 c = data[i];
         if (c == '\n') {
@@ -433,6 +440,7 @@ void irc_init(const char *nick) {
 static void irc_register(void) {
     ns_done = 0;                 /* allow auto-identify once on this connection */
     net_warn = 0;                /* fresh connection: clear any stale link warning */
+    idle_s = 0; ka_pinged = 0; link_up = 1;   /* arm the keepalive/timeout watchdog */
     net_send("NICK "); net_send(mynick); net_send("\r\n");
     net_send("USER sprintalk 0 * :" APP_TITLE "\r\n");
 }
@@ -445,12 +453,42 @@ i8 irc_connect(const char *host, const char *port) {
 
 u8 irc_connected(void) { return net_is_connected(); }
 
-/* Called by the main loop when net_poll reports the link dropped (ESP "CLOSED").
- * Note it in the server window, drop registration, refresh the status bar. */
-void irc_on_disconnect(void) {
+/* One-shot link teardown: note it, drop registration, refresh status. Guarded by
+ * link_up so it fires once even if both keepalive and the main loop notice. */
+static void link_down(const char *why) {
+    if (!link_up) return;
+    link_up = 0;
     registered = 0;
-    win_print(0, "* Disconnected from server (connection closed)");
+    net_warn = 0;
+    win_print(0, why);
     status_refresh();
+}
+
+/* Called by the main loop when net_poll reports the link dropped (ESP "CLOSED"). */
+void irc_on_disconnect(void) {
+    link_down("* Disconnected from server (connection closed)");
+}
+
+/* Keepalive + dead-link timeout. Call once per main-loop pass; self-throttles to
+ * once per second. After KA_PING_S of silence we PING the server; if there is
+ * still no reply by KA_TIMEOUT_S we close the (apparently dead) link. Any RX
+ * resets the timer (see irc_feed). */
+void irc_keepalive(void) {
+    static u8 last_s = 0xFF;
+    dss_time_t t;
+    dss_gettime(&t);
+    if (t.second == last_s) return;          /* once per second */
+    last_s = t.second;
+    if (!link_up) return;
+    if (idle_s < 0xFFFF) idle_s++;
+    if (idle_s >= KA_PING_S && !ka_pinged) {
+        ka_pinged = 1;
+        net_send("PING :keepalive\r\n");
+    }
+    if (idle_s >= KA_TIMEOUT_S) {
+        net_close();
+        link_down("* Connection timed out (no data from server)");
+    }
 }
 
 const char *irc_nick_str(void) { return mynick; }
@@ -470,6 +508,16 @@ void irc_join(const char *chan) {
 void irc_part(void) {
     if (wcur == 0) return;
     net_send("PART "); net_send(win[wcur].name); net_send("\r\n");
+    win_close(wcur);
+}
+
+/* /close: close the current window. PART it first if it's a channel; a query
+ * window (or the server window stays) just closes locally. */
+void irc_close(void) {
+    if (wcur == 0) { term_notif("cannot close the server window"); return; }
+    if ((win[wcur].name[0] == '#' || win[wcur].name[0] == '&') && net_is_connected()) {
+        net_send("PART "); net_send(win[wcur].name); net_send("\r\n");
+    }
     win_close(wcur);
 }
 

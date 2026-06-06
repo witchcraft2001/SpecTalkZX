@@ -50,6 +50,8 @@ To change your nick: `/nick NewName`.
 - **Join:** `/join #sprinter` — opens a new window and switches to it.
 - **Switch windows:** **Tab** (next) and **Shift+Tab** (previous).
 - **Leave:** `/part` leaves the channel in the current window.
+- **Close:** `/close` closes the current window — `/part`s it first if it is a
+  channel, or just closes a private window. (The server window can't be closed.)
 - **Talk:** type a message and press Enter. Your own messages are echoed as
   `<YourNick> text`. Other people appear as `<Their Nick> text`, each nick in its
   own colour (the same person always gets the same colour).
@@ -157,8 +159,13 @@ sends `QUIT`, closes the link cleanly, and returns to DSS.
   again.
 - **Won't connect / no welcome** — check that `NETUP` really joined Wi-Fi, and
   that the server name is correct.
-- **"Connection lost"** — the server closed the link (timeout, ping, or a flood
-  such as a huge `/list`). Reconnect with `/server …`.
+- **"Connection lost" / "Connection timed out"** — the link dropped (the server
+  closed it, or there was no data for several minutes and the keepalive got no
+  reply). SprinTalk PINGs the server when idle and gives up if the link is dead;
+  reconnect with `/server …`.
+- **"ESP NOT RESPONDING"** in the status bar — a send could not go out (the ESP
+  is wedged or the serial link is stuck). Check NETUP / the card; it clears once
+  data flows again.
 - **Garbled Russian** — toggle `/encoding`.
 - **Settings** — server, port, nick and NickServ password are stored in
   `SPTALK.CFG` in the current directory; delete it to reset.
