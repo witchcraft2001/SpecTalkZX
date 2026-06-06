@@ -50,11 +50,13 @@ idiomatic Sprinter-SDK C. Track and remove:
       (Up recalls it), and show a hint. Saved on /server and /nick.
       TODO extend: nickpass (done), autoconnect, theme, toggles (original config
       keys); option to store in %NET_DIR%; fall back gracefully if read-only.
-- [ ] Multi-server history: SPTALK.CFG currently keeps only the LAST server/port.
-      Save a list of all servers connected to (e.g. SERVER1=/SERVER2=… or a
-      [servers] block) and let the user pick/recall any of them (Up cycles through
-      them, or a small picker). Keep "last" as the default. Optional: per-server
-      port and autojoin channels.
+- [x] Multi-server history: SPTALK.CFG keeps the last CFG_MAX_SRV servers
+      (SRV1=..SRV5=, newest first, deduped). On startup all are seeded into the
+      input recall, so Up cycles through them (newest first). Saved on /server.
+      Optional later: a small picker, per-server autojoin channels.
+- [ ] /register <password> <email>: convenience wrapper that sends
+      `PRIVMSG NickServ :REGISTER <password> <email>` (one-time nick registration),
+      so the user doesn't have to type it through /msg. Maybe also /verify.
 - [ ] Per-window paged history (NEXT): a DSS page per window (Dss.GetMem, up to
       16 KB), append all messages, restore last lines on switch, PgUp/PgDn to
       scroll. Uses the WIN3-map + copy-to-WIN2-before-DSS discipline.

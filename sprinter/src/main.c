@@ -149,8 +149,7 @@ static void do_command(char *line) {
         if (!port[0]) port = "6667";
         term_notif("connecting...");
         irc_connect(host, port);
-        s_cpy(S.server, host, sizeof(S.server));
-        s_cpy(S.port, port, sizeof(S.port));
+        cfg_add_server(&S, host, port);     /* remember it (recent-server list) */
         save_settings();
     } else if (starts(cmd, "nick")) {
         if (arg[0]) { irc_set_nick(arg); save_settings(); }
@@ -269,15 +268,17 @@ void main(void) {
         }
     }
 
-    if (S.loaded && S.server[0]) {           /* offer the last server via history */
-        char seed[64], *o = seed;
-        const char *p = "/server ";
-        while (*p) *o++ = *p++;
-        p = S.server; while (*p) *o++ = *p++;
-        if (S.port[0]) { *o++ = ' '; p = S.port; while (*p) *o++ = *p++; }
-        *o = 0;
-        eh_seed(seed);
-        irc_local("Saved server found: press Up to recall /server, ENTER to connect.");
+    if (S.loaded && S.nsrv) {                /* offer recent servers via the recall */
+        u8 si = S.nsrv;
+        while (si--) {                       /* push oldest..newest so newest recalls first */
+            char seed[72], *o = seed;
+            const char *p = "/server ";
+            while (*p) *o++ = *p++;
+            p = S.srv[si]; while (*p) *o++ = *p++;
+            *o = 0;
+            eh_seed(seed);
+        }
+        irc_local("Recent servers: press Up to recall /server, ENTER to connect.");
     } else {
         irc_local("Try:  /server irc.libera.chat   then  /join #test");
     }

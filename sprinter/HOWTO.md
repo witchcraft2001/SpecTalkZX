@@ -39,8 +39,9 @@ In the server window, type:
 ```
 
 (Optionally add a port: `/server irc.libera.chat 6667`.) Wait for the welcome /
-MOTD text. Your nick and server are saved to `SPTALK.CFG`, so next time you can
-just press **Up** to recall the `/server …` line and Enter.
+MOTD text. Your nick and the last few servers you used are saved to `SPTALK.CFG`;
+next time press **Up** to cycle through the recent `/server …` lines and Enter to
+connect.
 
 To change your nick: `/nick NewName`.
 

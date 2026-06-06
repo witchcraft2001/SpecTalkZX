@@ -42,8 +42,9 @@ SprinTalk is built for a specific network card; the build tag tells you which:
 5. **Chat:** type a line and press Enter. Switch windows with **Tab**.
 6. **Quit:** press **Esc** (confirm with Esc again).
 
-On first run a random nick like `SprXXXX` is generated and saved. Your last
-server and nick are remembered in `SPTALK.CFG` for next time.
+On first run a random nick like `SprXXXX` is generated and saved. Your nick and
+the last few servers you connected to are remembered in `SPTALK.CFG`; press **Up**
+to cycle through the recent `/server …` lines.
 
 ## Common commands
 
