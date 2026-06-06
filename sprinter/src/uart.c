@@ -19,6 +19,15 @@
 #define LSR_DR   0x01    /* data ready */
 #define LSR_THRE 0x20    /* transmit holding register empty */
 
+#define TX_GUARD 30000   /* THRE spin limit (~tens of ms) before declaring a stall */
+
+/* Set when a TX could not complete (ESP wedged / hardware flow held off). The
+ * old code spun ~64K then wrote anyway, freezing seconds per line; now we abort
+ * the line and raise this so the UI can warn instead of hanging silently. */
+u8 uart_tx_stall;
+u8 uart_stalled(void) { return uart_tx_stall; }
+void uart_clear_stall(void) { uart_tx_stall = 0; }
+
 static u8 streq(const char *a, const char *b) {
     while (*a && *b) { if (*a != *b) return 0; a++; b++; }
     return *a == *b;
@@ -36,6 +45,7 @@ u8 uart_divisor(const char *baud) {
 }
 
 void uart_init(u8 divisor) {
+    uart_tx_stall = 0;
     isa_open();
     *U_FCR = 0x81;          /* FIFO enable + RX trigger 8 (for RTS/CTS flow) */
     *U_IER = 0x00;          /* no interrupts */
@@ -51,7 +61,9 @@ void uart_tx_str(const char *s) {
     isa_open();
     while (*s) {
         u16 guard = 0;
-        while (!(*U_LSR & LSR_THRE)) { if (++guard == 0) break; }  /* bounded wait */
+        while (!(*U_LSR & LSR_THRE)) {
+            if (++guard >= TX_GUARD) { uart_tx_stall = 1; isa_close(); return; }  /* abort, don't hang */
+        }
         *U_THR = (u8)*s++;
     }
     isa_close();

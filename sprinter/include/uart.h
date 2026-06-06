@@ -13,7 +13,10 @@
 
 u8   uart_divisor(const char *baud);  /* NET.CFG BAUD string -> divisor (default 8) */
 void uart_init(u8 divisor);           /* 8N1, FIFO, RTS/CTS auto-flow */
-void uart_tx_str(const char *s);      /* send a NUL-terminated string (blocks on THRE, bounded) */
+void uart_tx_str(const char *s);      /* send a NUL-terminated string; aborts on a TX stall */
 u16  uart_drain(u8 *buf, u16 max);    /* read all currently-available RX bytes (non-blocking) */
+
+u8   uart_stalled(void);              /* 1 if a TX recently failed to drain (ESP wedged) */
+void uart_clear_stall(void);          /* clear the stall flag */
 
 #endif /* UART_H */

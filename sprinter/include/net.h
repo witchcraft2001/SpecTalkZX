@@ -21,6 +21,8 @@ void net_send(const char *s);                         /* send raw bytes (NUL-ter
 u16  net_poll(u8 *buf, u16 max);                       /* non-blocking: bytes available now */
 void net_close(void);                                  /* escape transparent mode, close socket */
 u8   net_is_connected(void);
+u8   net_stalled(void);            /* 1 if a send recently failed (ESP not draining TX) */
+void net_clear_stall(void);        /* acknowledge/clear the stall flag */
 const char *net_cfg_baud(void);   /* parsed NET.CFG BAUD (diagnostic) */
 u8   net_cfg_div(void);            /* UART divisor actually applied */
 

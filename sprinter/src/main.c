@@ -228,6 +228,7 @@ void main(void) {
     u8 was_conn = 0;
 
     term_init();
+    term_notif("Starting up...");                         /* immediate feedback while loading */
     cfg_load(&S);
     if (!S.nick[0]) { gen_nick(S.nick); cfg_save(&S); }   /* unique default nick, persisted */
     irc_init(S.nick);
@@ -237,6 +238,7 @@ void main(void) {
     eh_init();
     for (i = 0; i < IN_MAX; i++) inbuf[i] = 0;
 
+    term_notif("Initializing network (ESP), please wait...");
     {
         i8 nr = net_init();
         if (nr == NET_NO_LINK) {            /* NETUP not run -> message and exit */
@@ -294,6 +296,14 @@ void main(void) {
             term_notif("Connection lost (server closed the link)");
         }
         was_conn = irc_connected();
+
+        if (net_stalled()) {                  /* a send couldn't drain: ESP wedged */
+            irc_net_warn(1);
+            term_notif("WARNING: ESP not responding. Check the link / NETUP.");
+            net_clear_stall();                /* re-arm so recovery can clear it */
+        } else if (n) {
+            irc_net_warn(0);                  /* RX flowing again -> link healthy */
+        }
 
         term_clock();
 

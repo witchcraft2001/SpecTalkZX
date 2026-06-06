@@ -6,6 +6,7 @@
 #include "net.h"
 #include "isauart.h"
 #include "uart.h"
+#include "term.h"
 
 static u8 connected;
 static u8 scratch[256];
@@ -20,7 +21,7 @@ static void quiet(u8 n) {
     while (k < n) {
         uart_drain(scratch, sizeof(scratch));
         dss_gettime(&t);
-        if (t.second != last) { last = t.second; k++; }
+        if (t.second != last) { last = t.second; k++; term_clock(); }  /* keep the clock alive during waits */
     }
 }
 
@@ -120,3 +121,6 @@ void net_close(void) {
 }
 
 u8 net_is_connected(void) { return connected; }
+
+u8 net_stalled(void) { return uart_stalled(); }
+void net_clear_stall(void) { uart_clear_stall(); }

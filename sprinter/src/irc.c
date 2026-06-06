@@ -64,6 +64,8 @@ static void banner_refresh(void) {
     term_banner(out);
 }
 
+static u8 net_warn;                  /* show a link-trouble marker in the status bar */
+
 static void status_refresh(void) {
     u8 i;
     o_init();
@@ -77,9 +79,13 @@ static void status_refresh(void) {
         o_c(' ');
     }
     o_c(']');
+    if (net_warn) o_str("  *** ESP NOT RESPONDING ***");
+    else if (registered) o_str("  online");
     o_end();
     term_status(out);
 }
+
+void irc_net_warn(u8 on) { if (net_warn != on) { net_warn = on; status_refresh(); } }
 
 static i8 win_find(const char *name) {
     u8 i;
@@ -128,24 +134,40 @@ static u8 is_ignored(const char *nick) {
     return 0;
 }
 
-/* route a finished line to a window: store in history; show if current+live */
+/* route a finished line to a window: prepend timestamp, strip IRC formatting
+ * control codes (bold/colour/underline/… render as junk box glyphs on the
+ * Sprinter font — e.g. NickServ wraps names in bold 0x02), store in history. */
 static void win_print(i8 idx, const char *line) {
     u8 w;
+    char *o = tsbuf;
+    const u8 *p = (const u8 *)line;
+    const char *end = tsbuf + sizeof(tsbuf) - 1;
     if (idx < 0) idx = 0;
     w = (u8)idx;
     if (ts_on) {                         /* prepend "[HH:MM] " */
         dss_time_t t;
-        char *o = tsbuf;
-        const char *p = line;
         dss_gettime(&t);
         *o++ = '['; *o++ = (char)('0' + (t.hour / 10) % 10); *o++ = (char)('0' + t.hour % 10);
         *o++ = ':'; *o++ = (char)('0' + (t.minute / 10) % 10); *o++ = (char)('0' + t.minute % 10);
         *o++ = ']'; *o++ = ' ';
-        while (*p && o < tsbuf + sizeof(tsbuf) - 1) *o++ = *p++;
-        *o = 0;
-        line = tsbuf;
     }
-    hist_add(w, line, (u8)(w == wcur && hist_is_live(w)));
+    while (*p && o < end) {
+        u8 c = *p++;
+        if (c == 0x03) {                 /* colour: optional N[,M] digits */
+            if (*p >= '0' && *p <= '9') { p++; if (*p >= '0' && *p <= '9') p++;
+                if (*p == ',' && p[1] >= '0' && p[1] <= '9') { p += 2; if (*p >= '0' && *p <= '9') p++; } }
+            continue;
+        }
+        if (c == 0x04) {                 /* hex colour: up to 6 hex digits */
+            u8 k = 0;
+            while (k < 6 && ((*p >= '0' && *p <= '9') || ((*p | 32) >= 'a' && (*p | 32) <= 'f'))) { p++; k++; }
+            continue;
+        }
+        if (c < 0x20) continue;          /* bold/italic/underline/reset/reverse/… -> drop */
+        *o++ = (char)c;
+    }
+    *o = 0;
+    hist_add(w, tsbuf, (u8)(w == wcur && hist_is_live(w)));
     if (w != wcur) { win[w].flags |= F_UNREAD; status_refresh(); }
 }
 
@@ -410,6 +432,7 @@ void irc_init(const char *nick) {
 
 static void irc_register(void) {
     ns_done = 0;                 /* allow auto-identify once on this connection */
+    net_warn = 0;                /* fresh connection: clear any stale link warning */
     net_send("NICK "); net_send(mynick); net_send("\r\n");
     net_send("USER sprintalk 0 * :" APP_TITLE "\r\n");
 }
