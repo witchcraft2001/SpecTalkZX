@@ -357,6 +357,8 @@ static void dispatch(char *usr, char *cmd, char *par, char *txt) {
     split_params(par);
     if (seq(cmd, "PING")) {
         net_send("PONG :"); net_send(*txt ? txt : arg(0)); net_send("\r\n");
+    } else if (seq(cmd, "PONG")) {
+        /* reply to our keepalive PING — RX already reset the timer; don't show it */
     } else if (seq(cmd, "PRIVMSG")) {
         h_privmsg(usr, (char *)arg(0), txt, 0);
     } else if (seq(cmd, "NOTICE")) {

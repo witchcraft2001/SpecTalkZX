@@ -154,7 +154,7 @@ static void do_command(char *line) {
     } else if (starts(cmd, "nick")) {
         if (arg[0]) { irc_set_nick(arg); save_settings(); }
     } else if (starts(cmd, "join")) {
-        if (arg[0]) irc_join(arg);
+        if (arg[0]) { irc_join(arg); cfg_add_chan(&S, arg); save_settings(); }
     } else if (starts(cmd, "query")) {
         if (arg[0]) irc_query(arg); else term_notif("usage: /query <nick>");
     } else if (starts(cmd, "msg")) {
@@ -273,6 +273,19 @@ void main(void) {
         }
     }
 
+    /* Seed the input recall: channels first, then servers, so the most recent
+     * /server is what Up offers first (you connect before you join). */
+    if (S.loaded) {
+        u8 k = S.nchan;
+        while (k--) {
+            char seed[40], *o = seed;
+            const char *p = "/join ";
+            while (*p) *o++ = *p++;
+            p = S.chan[k]; while (*p) *o++ = *p++;
+            *o = 0;
+            eh_seed(seed);
+        }
+    }
     if (S.loaded && S.nsrv) {                /* offer recent servers via the recall */
         u8 si = S.nsrv;
         while (si--) {                       /* push oldest..newest so newest recalls first */
@@ -283,7 +296,7 @@ void main(void) {
             *o = 0;
             eh_seed(seed);
         }
-        irc_local("Recent servers: press Up to recall /server, ENTER to connect.");
+        irc_local("Recent servers/channels: press Up to recall, ENTER to run.");
     } else {
         irc_local("Try:  /server irc.libera.chat   then  /join #test");
     }
@@ -339,7 +352,9 @@ void main(void) {
         }
     }
 
-    if (irc_connected()) { term_notif("disconnecting, please wait..."); irc_quit(); }
+    term_notif("Closing link, restoring ESP...");
+    if (irc_connected()) irc_quit();   /* QUIT + net_close (restores ESP) */
+    else net_close();                  /* link already down: still restore CIPMODE=0 */
     dss_clrscr();
     dss_gotoxy(1, 1);
     dss_puts(APP_NAME " - bye.\r\n");

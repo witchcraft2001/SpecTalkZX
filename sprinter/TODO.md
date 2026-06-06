@@ -1,5 +1,33 @@
 # SpecTalk Sprinter port — TODO
 
+## Navigation & autocompletion rework (proposed)
+
+Goal: free **Tab** for autocompletion by moving window switching to other keys.
+
+- [ ] Window switching:
+        * **Ctrl+Tab** = next window (forward)
+        * **Shift+Tab** = previous window (reverse)
+      (Tab alone stops switching windows — reserved for completion below.)
+- [ ] Quick channel select: **Alt+<digit>**. Number channels from **1**; the
+      digit **0 = the 10th** channel (Alt+1..Alt+9, Alt+0). Open question: window
+      0 is currently the server window. Decide the mapping — e.g. keep server as a
+      separate slot (Alt+`/Esc-to-server?) and number only channels/queries 1..10,
+      which means MAX_WIN must hold server + 10 (today MAX_WIN=10 includes server).
+      Update the status-bar window list to match the 1-based numbering.
+- [ ] **Tab = autocompletion** for two contexts:
+        * at the start of the line after `/` → complete **command** names;
+        * elsewhere → complete **nicks** from the current channel's member roster
+          (requires the per-channel nick list — see below).
+      Collision handling (multiple candidates share the typed prefix), suggested:
+        1. First Tab completes to the **longest common prefix** of all matches.
+        2. If still ambiguous, repeated Tab **cycles** through the candidates
+           (insert each in turn); show the candidate list on the notif line.
+        3. A nick completion at the start of a line may append a separator
+           (e.g. ": ") like common clients; mid-line just inserts the nick.
+- [ ] Prerequisite for nick completion: maintain a **per-channel member roster**
+      (from RPL_NAMREPLY 353/366 + JOIN/PART/QUIT/KICK/NICK), bounded in size
+      (e.g. last ~40 active nicks; store in a DSS page like history if needed).
+
 ## Legacy cleanup (de-ZX-ification)
 
 When the original `irc_handlers.c` / `user_cmds.c` / `spectalk.c` logic is adapted
@@ -54,6 +82,17 @@ idiomatic Sprinter-SDK C. Track and remove:
       (SRV1=..SRV5=, newest first, deduped). On startup all are seeded into the
       input recall, so Up cycles through them (newest first). Saved on /server.
       Optional later: a small picker, per-server autojoin channels.
+- [~] BUG (fix applied, needs HW verification): after SprinTalk exited, kit tools
+      (ftp/wget) reported "ESP communication error #1". ROOT CAUSE: the kit tools
+      run the ESP in NORMAL mode (CIPMODE=0: AT+CIPSEND=<len> + "SEND OK", +IPD
+      receive); SprinTalk used transparent mode (CIPMODE=1) and never restored
+      CIPMODE=0 on exit, so their AT commands failed. FIX: net_close() now calls
+      esp_restore() which escapes transparent (+++), CIPCLOSE, and AT+CIPMODE=0,
+      and it runs on EVERY exit (incl. after a timeout/CLOSED), guarded by
+      ever_used. Echo left ATE0 (the kit uses ATE0 too, e.g. tcptest.asm).
+      Verify on HW: run SprinTalk, /quit or ESC, then run wget/ftp — should work.
+      If it still fails, check baud (UART_DEF persisted?) and whether the kit's
+      hardware ESP_RESET (MCR OUT1) is enough on its own.
 - [ ] /register <password> <email>: convenience wrapper that sends
       `PRIVMSG NickServ :REGISTER <password> <email>` (one-time nick registration),
       so the user doesn't have to type it through /msg. Maybe also /verify.

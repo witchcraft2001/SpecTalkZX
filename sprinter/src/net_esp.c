@@ -9,6 +9,7 @@
 #include "term.h"
 
 static u8 connected;
+static u8 ever_used;        /* we put the ESP into transparent mode at least once */
 static u8 scratch[256];
 static char g_baud[8];      /* NET.CFG BAUD as parsed (diagnostic) */
 static u8   g_div;          /* divisor actually applied */
@@ -39,6 +40,20 @@ static void esp_reset(void) {
     uart_tx_str("\r\n");      /* flush any partial command-mode buffer */
     at("ATE0", 1);
     at("AT+CIPCLOSE", 1);
+}
+
+/* Hand the ESP back the way the SprinterWiFi tools (ftp/wget/...) expect it:
+ * out of transparent mode, socket closed, and CRUCIALLY CIPMODE=0 (normal mode).
+ * We put it in CIPMODE=1; if we don't undo that, their AT commands fail with
+ * "ESP communication error #1". Echo stays off (ATE0) — the kit uses ATE0 too. */
+static void esp_restore(void) {
+    quiet(1);
+    uart_tx_str("+++");       /* escape transparent mode if still in it */
+    quiet(1);
+    uart_tx_str("\r\n");
+    at("ATE0", 1);
+    at("AT+CIPCLOSE", 1);     /* close any socket (harmless if none) */
+    at("AT+CIPMODE=0", 1);    /* <-- restore normal mode for the next program */
 }
 
 /* case-insensitive equality */
@@ -92,6 +107,7 @@ static void watch_closed(const u8 *buf, u16 n) {
 i8 net_connect(const char *host, const char *port) {
     esp_reset();
     cm = 0;
+    ever_used = 1;            /* from here the ESP needs CIPMODE restored on exit */
     at("AT+CIPMUX=0", 1);
     at("AT+CIPMODE=1", 1);
     /* AT+CIPSTART="TCP","<host>",<port> */
@@ -116,8 +132,12 @@ u16 net_poll(u8 *buf, u16 max) {
     return n;
 }
 
+/* Close the link. Restores the ESP whenever we ever entered transparent mode —
+ * even if the socket is already gone (timeout/CLOSED), so CIPMODE is always put
+ * back to 0 before we hand the card to the next program. */
 void net_close(void) {
-    if (connected) { esp_reset(); connected = 0; }
+    if (ever_used) esp_restore();
+    connected = 0;
 }
 
 u8 net_is_connected(void) { return connected; }
