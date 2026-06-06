@@ -25,5 +25,6 @@ u8   net_stalled(void);            /* 1 if a send recently failed (ESP not drain
 void net_clear_stall(void);        /* acknowledge/clear the stall flag */
 const char *net_cfg_baud(void);   /* parsed NET.CFG BAUD (diagnostic) */
 u8   net_cfg_div(void);            /* UART divisor actually applied */
+u8   net_cfg_slot(void);          /* ISA slot the UART was found in (0/1) */
 
 #endif /* NET_H */

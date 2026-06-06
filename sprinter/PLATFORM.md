@@ -64,6 +64,31 @@ At the DSS prompt, switch to the floppy drive and run `SPTALK`.
   probe returns PRESENT on the test machine.
 - **Disconnect detection:** in transparent mode the ESP prints `\r\nCLOSED\r\n` on
   the UART when the socket closes; `net_poll` watches the RX stream for that token.
+- **ISA slot is NOT fixed to ISA1.** `isa_open` maps WIN3 to slot byte
+  `(slot<<1)|0xD4` → slot0=0xD4 (ISA1), slot1=0xD6 (ISA2). NETUP publishes the
+  detected slot in env var `NET_ESP_HW` = `"<slot>/#3E8"` (first char = slot 0/1);
+  `net_init` reads it and calls `isa_set_slot` before probing. `uart_probe` also
+  scans both slots (and checks the IER hi-nibble reads 0, like the network lib's
+  `UART_FIND`) as a fallback. Hardcoding 0xD4 = "ESP not found" when the card is in
+  the other slot.
+- **RX data loss: lower the FIFO trigger; do NOT toggle RTS by hand.** NETUP enables
+  full hardware flow control on the ESP at setup — confirmed on HW: its
+  `+UART_CUR:115273,8,1,0,3` line shows flow=3 even at the default baud (trailing `3`).
+  So the ESP honours RTS/CTS and an app must NOT re-send `AT+UART_CUR` (needless
+  baud-touch risk) nor turn flow off on exit. The loss came from the local 16550's
+  AFE trigger being **8**: AFE deasserts RTS only once 8 bytes sit in the FIFO,
+  leaving just 8 bytes of in-flight headroom — a slow-reacting ESP keeps sending past
+  that during a long render (scroll + per-row draw) and overruns (lost MOTD chunks).
+  Fix: lower the **RX trigger** so AFE drops RTS earlier. Now AFE drops RTS as soon as
+  the FIFO reaches the trigger, so while net_poll isn't draining (during the render)
+  RTS stays low and the ESP is held off the *whole* time — the same "pause during
+  render" effect, but driven automatically by the FIFO level. **Do not** force RTS low
+  manually via `MCR=0x20`: on real HW that wedged RX completely (RTS apparently stuck
+  low / never resumed). Let AFE drive RTS off the FIFO — that is the mechanism that
+  already worked at trigger 8, just safer. Tuning (verified on HW): trigger **1**
+  (`FCR=0x07`) eliminated the loss but throttled bursts (MOTD slow); trigger **4**
+  (`FCR=0x47`, 12 bytes headroom) is the chosen speed/safety compromise. Trigger 8
+  (`FCR=0x81`) was the original lossy setting.
 - **Scrolling: DSS `#55` (SCROLL) wedges** on a full-width region (it calls BIOS
   `#B7` internally; see `sprinter_dss/VIDEO.ASM`). The working approach (used by
   `texteditor`) is **BIOS `#8A` (LP_SCROLL_UD) directly**: `B`=dir (1=up, 2=down),

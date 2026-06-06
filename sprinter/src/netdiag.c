@@ -58,11 +58,22 @@ void main(void) {
 
     line("");
     line("--- ISA / TL16C550 UART probe @ 0xC3E8 (WIN3) ---");
+    {   /* honour NETUP's detected slot first, then let uart_probe scan both */
+        char hw[16];
+        if (dss_getenv("NET_ESP_HW", hw) == 0 && hw[0] >= '0' && hw[0] <= '9')
+            isa_set_slot((u8)(hw[0] - '0'));
+    }
     uart = uart_probe();    /* opens ISA, scratch test, closes ISA, restores WIN3 */
-    if (uart)
-        line("UART         : PRESENT (scratch register responded)");
-    else
+    if (uart) {
+        char msg[40], *o = msg;
+        const char *p = "UART         : PRESENT in ISA slot ";
+        while (*p) *o++ = *p++;
+        *o++ = (char)('0' + (isa_get_slot() & 1));
+        *o = 0;
+        line(msg);
+    } else {
         line("UART         : not detected (no ESP card / emulator) -- expected off HW");
+    }
     line("ISA window   : opened and closed; WIN3 restored");
 
     line("");

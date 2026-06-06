@@ -17,13 +17,22 @@
 #include <sprinter.h>
 
 #define UART_BASE 0xC3E8
+#define UART_IER  0xC3E9   /* interrupt-enable register — hi nibble reads 0 on a real UART */
 #define UART_SCR  0xC3EF   /* scratch register — used for presence test */
 
 void isa_open(void);       /* remap WIN3 to ISA (saves prev page) — no DSS calls until close */
 void isa_close(void);      /* restore WIN3 */
 
-/* Self-contained: opens ISA, runs the scratch-register presence test, closes ISA.
- * Returns 1 if a TL16C550 responds, 0 otherwise. Safe to call between DSS calls. */
+/* Select which ISA slot the UART lives in (0 -> ISA1/0xD4, 1 -> ISA2/0xD6).
+ * isa_open() maps that slot from then on. NETUP publishes the detected slot in
+ * the NET_ESP_HW env var ("<slot>/#3E8"); net_init() feeds it here. */
+void isa_set_slot(u8 slot);
+u8   isa_get_slot(void);   /* slot index currently selected (diagnostic) */
+
+/* Self-contained presence test (IER hi-nibble + scratch-register write/readback),
+ * mirroring the network lib's UART_FIND. Probes the currently-selected slot first,
+ * then scans slot 0 and slot 1; on success leaves that slot selected and returns 1.
+ * Returns 0 if no TL16C550 responds in any slot. Safe to call between DSS calls. */
 u8 uart_probe(void);
 
 #endif /* ISAUART_H */

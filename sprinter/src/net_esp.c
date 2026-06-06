@@ -74,6 +74,14 @@ i8 net_init(void) {
      * vars; NET=WIFI marks the link is up. Read NET_BAUD for the actual baud
      * NETUP applied (no NET.CFG parsing needed). */
     if (dss_getenv("NET", v) != 0 || !ci_eq(v, "WIFI")) return NET_NO_LINK;
+    /* NETUP records the detected ISA slot in NET_ESP_HW = "<slot>/#3E8". Honour it
+     * so we map the right slot (the card need not be in ISA1); uart_probe still
+     * scans both slots as a fallback if the hint is missing or wrong. */
+    {
+        char hw[16];
+        if (dss_getenv("NET_ESP_HW", hw) == 0 && hw[0] >= '0' && hw[0] <= '9')
+            isa_set_slot((u8)(hw[0] - '0'));
+    }
     if (!uart_probe()) return NET_NO_HW;
     if (dss_getenv("NET_BAUD", g_baud) != 0) g_baud[0] = 0;
     g_div = uart_divisor(g_baud);
@@ -84,6 +92,7 @@ i8 net_init(void) {
 
 const char *net_cfg_baud(void) { return g_baud; }
 u8 net_cfg_div(void) { return g_div; }
+u8 net_cfg_slot(void) { return isa_get_slot(); }
 
 /* When the remote closes the socket, ESP-AT leaves transparent mode and emits a
  * "\r\nCLOSED\r\n" line on the UART. We watch the RX stream for that token (a

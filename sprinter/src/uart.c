@@ -19,6 +19,9 @@
 #define LSR_DR   0x01    /* data ready */
 #define LSR_THRE 0x20    /* transmit holding register empty */
 
+#define MCR_AFE  0x20    /* auto flow control enable */
+#define MCR_RTS  0x02    /* request to send (asserted = ESP may transmit) */
+
 #define TX_GUARD 30000   /* THRE spin limit (~tens of ms) before declaring a stall */
 
 /* Set when a TX could not complete (ESP wedged / hardware flow held off). The
@@ -47,13 +50,21 @@ u8 uart_divisor(const char *baud) {
 void uart_init(u8 divisor) {
     uart_tx_stall = 0;
     isa_open();
-    *U_FCR = 0x81;          /* FIFO enable + RX trigger 8 (for RTS/CTS flow) */
+    /* FIFO on + RX trigger level 4 (FCR bits7:6 = 01). With AFE auto-flow the UART
+     * deasserts RTS once >=4 bytes sit in the RX FIFO, so during a slow render (when
+     * net_poll isn't draining) RTS stays low and the ESP (flow=3, set by NETUP) is
+     * held off for the WHOLE render — no overrun, with 12 bytes of in-flight headroom.
+     * Trigger 8 left only 8 bytes and a slow-reacting ESP overran (lost MOTD chunks);
+     * trigger 1 fixed that but throttled bursts, so 4 is the speed/safety compromise.
+     * We do NOT toggle RTS manually: forcing MCR bit1 low wedged RX on real HW;
+     * letting AFE drive RTS off the FIFO level is the mechanism that already worked. */
+    *U_FCR = 0x47;          /* FIFO enable + flush RX/TX + RX trigger 4 */
     *U_IER = 0x00;          /* no interrupts */
     *U_LCR = 0x83;          /* DLAB | 8N1 */
     *U_DLL = divisor;
     *U_DLM = 0x00;
     *U_LCR = 0x03;          /* 8N1, DLAB off */
-    *U_MCR = 0x22;          /* AFE (auto flow) | RTS */
+    *U_MCR = MCR_AFE | MCR_RTS;
     isa_close();
 }
 

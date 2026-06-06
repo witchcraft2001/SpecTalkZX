@@ -375,7 +375,7 @@ void main(void) {
             irc_local("No SprinterWiFi (ESP) UART detected.");
             irc_local("UI works, networking unavailable.");
         } else {
-        char m[40], *o = m;
+        char m[48], *o = m;
         const char *p = "ESP ready. UART baud=";
         const char *b = net_cfg_baud();
         u8 d = net_cfg_div();
@@ -383,6 +383,8 @@ void main(void) {
         if (*b) { while (*b) *o++ = *b++; } else { *o++ = '('; *o++ = 'd'; *o++ = 'e'; *o++ = 'f'; *o++ = ')'; }
         *o++ = ' '; *o++ = 'd'; *o++ = 'i'; *o++ = 'v'; *o++ = '=';
         *o++ = (char)('0' + (d / 100) % 10); *o++ = (char)('0' + (d / 10) % 10); *o++ = (char)('0' + d % 10);
+        *o++ = ' '; *o++ = 's'; *o++ = 'l'; *o++ = 'o'; *o++ = 't'; *o++ = '=';
+        *o++ = (char)('0' + (net_cfg_slot() & 1));
         *o = 0;
         irc_local(m);
         irc_local("/help for commands.");
