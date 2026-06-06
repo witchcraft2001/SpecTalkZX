@@ -1,106 +1,67 @@
-# SpecTalk Sprinter port — TODO
+# SprinTalk (Sprinter DSS port) — TODO
 
-## Navigation & autocompletion rework
+Status: Stages 1–6 done. Core IRC + UI ported and, in several areas, beyond the
+original (paged history, UTF-8 recoding, multi-server, keepalive, completion).
+Next milestone: Stage 7 (NE2000 backend + packaging).
 
-- [x] Window switching: **Ctrl+Tab** = next, **Shift+Tab** = prev (Tab freed).
-- [x] Quick channel select **Alt+<digit>**: Alt+1..9 -> window 1..9, Alt+0 -> the
-      10th. MAX_WIN raised to 11 (index 0 = server, 1..10 = channels/queries).
-      Status bar renumbered: server shows as `S`, channels 1..9, 10 shown as `0`.
-- [x] **Tab = autocompletion**: after `/` -> command names; otherwise -> nicks.
-      Collision handling: first Tab fills the longest common prefix and lists the
-      candidates on the notif line; repeated Tab cycles through them. Nick at the
-      start of a line gets a ": " separator, mid-line a space.
-- [~] Nick roster is currently a **global recent-nick ring** (NR_MAX=16), fed by
-      PRIVMSG senders + JOINs + RPL_NAMREPLY (353). Memory-cheap but NOT
-      per-channel and bounded. POSSIBLE UPGRADE: a true per-channel roster
-      (full NAMES + JOIN/PART/QUIT/KICK/NICK upkeep) in a DSS page, if we want to
-      complete silent/lurking users and scope by channel. (Code headroom is now
-      ~2.2 KB — a bigger roster likely needs the DSS-page approach, not RAM.)
+## Open
 
-## Legacy cleanup (de-ZX-ification)
+### Stage 7 — NE2000 (RTL8019A) backend + packaging
+- [ ] Second network card behind `net.h` (no IRC/UI changes): software stack
+      ARP → IPv4 → single-socket TCP (port the RTL8019A sjasm stack's logic to C,
+      or wrap it). Reference: `…/sprinter-rtl8019a/src/lib/{rtl8019,arp_lib,tcp_lib}.asm`,
+      `…/sprinter-rtl8019a/sprinter_rtl8019_soft.md`.
+- [ ] `NET_BACKEND=esp|ne2000` build variant; RTL reads IP/GW/MASK/DNS from env.
+- [ ] Ship the RTL build (`make distrib DIST_TAG=rtl` → `sptalk-0.1-rtl.zip`),
+      title shows `SprinTalk 0.1 RTL`.
 
-When the original `irc_handlers.c` / `user_cmds.c` / `spectalk.c` logic is adapted
-in (Stage 5+), it carries ZX/z88dk-isms that should be progressively cleaned to
-idiomatic Sprinter-SDK C. Track and remove:
+### Needs hardware verification (code done)
+- [ ] Ctrl+Tab / Shift+Tab nav, Alt+1..0 channel select, Tab completion.
+- [ ] Nick completion from the paged roster (e.g. `/msg Ha`+Tab → Hard in a busy
+      channel). `/roster` dumps it.
+- [ ] ESP handover: after exit, `wget`/`ftp` work (esp_restore sets CIPMODE=0).
+      If it still errors, check persisted baud (UART_DEF) / the kit's hw ESP_RESET.
 
-- [ ] Strip z88dk ABI annotations (`__z88dk_fastcall`, `__z88dk_callee`,
-      `__naked`/`ST_NAKED`) from ported code — SDCC uses its own convention.
-- [ ] Remove the global parser-context trick (`pkt_usr`/`pkt_par`/`pkt_txt`/
-      `pkt_cmd` globals used to avoid stack args) where it only existed to save
-      ZX bytes; pass args normally unless profiling says otherwise.
-- [ ] Replace ZX rendering hooks (`print_str64`, `print_char64`, `draw_status_bar`,
-      `clear_main`, `clear_line`, `notify`/`notify2`, `beep`) with the `term_*` HAL.
-- [ ] Replace `uart_send_string`/`uart_send_line`/`uart_send_crlf` with `net_*`.
-- [ ] Drop BPE string compression (`SB_*` tokens, `SPECTALK.DAT` dict) — not used
-      on Sprinter; use plain string literals (they live in code/rodata).
-- [ ] Drop theme-as-ZX-attributes (`themes.h`); map nick/mention colors to DSS
-      16-color attributes via `term`.
-- [ ] Remove overlay system assumptions (help/about/config/status were SD-loaded
-      overlays); make them resident text screens.
-- [ ] Re-evaluate buffer aliasing tricks (e.g. `names_friend_buf` over `notif_buf`)
-      — keep only if memory in WIN1 is actually tight.
-- [ ] Replace `st_stricmp`/`st_stristr`/`u16_to_dec`/etc. ASM utils with C (or SDK
-      string lib) versions.
-- [ ] Spanish comments: keep as-is when adapting, translate opportunistically.
+### Optional feature ports (from the original)
+- [ ] `/register <password> <email>` (+ maybe `/verify`): wrapper for the one-time
+      NickServ registration, so it isn't typed through `/msg`.
+- [ ] About / Config / What's-New as resident text screens (only `/help` exists).
+- [ ] `/clear` — clear the current window.
+- [ ] Friends list + "online" notifications (the only Stage-6 parity item skipped).
+- [ ] Formatted `/whois` / `/names` (currently forwarded raw; numerics shown as-is).
 
-## Functional TODO
+### Enhancements (beyond the original)
+- [ ] SASL login — identify during the handshake so a cloak applies before any
+      JOIN (host hidden from the very first packet; today we identify post-connect).
+- [~] Nick roster is global (one DSS page, capacity 128), fed by PRIVMSG/JOIN/353.
+      Possible upgrade: per-channel rosters with full JOIN/PART/QUIT/KICK/NICK
+      upkeep, if we want channel-scoped completion of silent users.
+- [ ] Multi-server: a small picker UI instead of Up-recall; per-server autojoin.
 
-- [ ] On-the-fly UTF-8 <-> CP866 recoding (the world is UTF-8; Sprinter renders
-      CP866). A persisted setting (toggle, default ON for public channels):
-      - RECEIVE (incoming text UTF-8 -> CP866): decode UTF-8 sequences; map
-        Cyrillic U+0400..U+04FF and common punctuation (dashes, quotes, NBSP...)
-        to their CP866 byte; ASCII (<0x80) passes through; unmappable -> '?'.
-        Apply to the displayable text of PRIVMSG/NOTICE/TOPIC/NAMES; protocol
-        tokens (commands, nicks, channels) are ASCII and untouched. Lines are
-        assembled whole before recoding, so multi-byte sequences never split.
-      - SEND (CP866 input -> UTF-8): expand high bytes (0x80..0xFF) to their
-        UTF-8 multi-byte form before transmit; ASCII passes through.
-      - Needs a CP866<->Unicode table for 0x80..0xFF (128 entries; the standard
-        CP866 codepage). Replaces the original SpecTalk's lossy UTF-8->ASCII
-        folding with proper Cyrillic-preserving recoding.
-      - Command e.g. /encoding (utf8|cp866|raw); save in SPECTALK.CFG.
-      - Best implemented with / after the WIN1+WIN2 code layout (adds ~0.5 KB).
+### Memory watch
+- [ ] Code headroom ~2 KB to the WIN1+WIN2 ceiling (0xA800); data+stack nearly
+      fill WIN2 (0xA800..0xBFFF). Before large additions, trim code or move more
+      data into DSS pages (as the roster/history already do). Beyond 32 KB would
+      need code banking (--codeseg) or overlays.
 
+## Done (recent)
+- [x] Flat WIN1+WIN2 code layout (crt0_flat, image spans 2 pages, build guard
+      `tools/check_layout.py`). Lifted the old WIN1-only ~15.5 KB code cap.
+- [x] Multi-window model (server + up to 10), Tab/Ctrl+Tab/Shift+Tab/Alt-digit nav,
+      activity (`*`) and mention (`!`) flags, 1-based status numbering.
+- [x] Per-window paged scrollback in DSS pages (PgUp/PgDn), BIOS #8A chat scroll.
+- [x] Timestamps, nick colouring (hashed DSS attrs), ignore, away, NickServ
+      (`/pass` + auto-identify, `/id`), `/me`, `/msg`, `/query`, `/close`.
+- [x] UTF-8 ↔ CP866 recoding (`/encoding`); strip mIRC formatting control codes.
+- [x] Network state from NETUP env vars (NET/NET_BAUD/…); refuse if NET≠WIFI.
+- [x] Keepalive PING + dead-link timeout; ESP "CLOSED" disconnect detection;
+      TX-stall detection with an "ESP NOT RESPONDING" status warning.
+- [x] Settings in SPTALK.CFG: nick, NickServ pass, recent servers (SRV1..) and
+      channels (CHAN1..), seeded into the input recall on startup.
+- [x] Tab autocompletion (commands + nicks) with common-prefix + cycle.
+- [x] Rebrand to SprinTalk 0.1, ESP/RTL backend tag, SPTALK.EXE, README/HOWTO
+      → plain-text docs, `make distrib` zip.
 
-- [x] Persist user settings to SPECTALK.CFG (current dir): last server/port/nick.
-      On startup: set the nick, seed the input history with `/server <last> <port>`
-      (Up recalls it), and show a hint. Saved on /server and /nick.
-      TODO extend: nickpass (done), autoconnect, theme, toggles (original config
-      keys); option to store in %NET_DIR%; fall back gracefully if read-only.
-- [x] Multi-server history: SPTALK.CFG keeps the last CFG_MAX_SRV servers
-      (SRV1=..SRV5=, newest first, deduped). On startup all are seeded into the
-      input recall, so Up cycles through them (newest first). Saved on /server.
-      Optional later: a small picker, per-server autojoin channels.
-- [~] BUG (fix applied, needs HW verification): after SprinTalk exited, kit tools
-      (ftp/wget) reported "ESP communication error #1". ROOT CAUSE: the kit tools
-      run the ESP in NORMAL mode (CIPMODE=0: AT+CIPSEND=<len> + "SEND OK", +IPD
-      receive); SprinTalk used transparent mode (CIPMODE=1) and never restored
-      CIPMODE=0 on exit, so their AT commands failed. FIX: net_close() now calls
-      esp_restore() which escapes transparent (+++), CIPCLOSE, and AT+CIPMODE=0,
-      and it runs on EVERY exit (incl. after a timeout/CLOSED), guarded by
-      ever_used. Echo left ATE0 (the kit uses ATE0 too, e.g. tcptest.asm).
-      Verify on HW: run SprinTalk, /quit or ESC, then run wget/ftp — should work.
-      If it still fails, check baud (UART_DEF persisted?) and whether the kit's
-      hardware ESP_RESET (MCR OUT1) is enough on its own.
-- [ ] /register <password> <email>: convenience wrapper that sends
-      `PRIVMSG NickServ :REGISTER <password> <email>` (one-time nick registration),
-      so the user doesn't have to type it through /msg. Maybe also /verify.
-- [ ] Per-window paged history (NEXT): a DSS page per window (Dss.GetMem, up to
-      16 KB), append all messages, restore last lines on switch, PgUp/PgDn to
-      scroll. Uses the WIN3-map + copy-to-WIN2-before-DSS discipline.
-- [ ] Stage 5b: multi-window/channel model (up to 10), window switching, activity
-      indicators, mention highlight.
-- [ ] Stage 6: timestamps, nick coloring, notifications, friends, ignore, NickServ
-      auto-id, away, help/about/config/status screens.
-- [ ] net layer: detect ESP errors (CLOSED/ERROR) in net_connect instead of fixed
-      delays; surface connect failures; reconnect.
-- [ ] Hardware scroll via BIOS #8A (O(1)) to replace the RAM-ring chat redraw.
-- [ ] CODE LIMIT: code is in WIN1 only (crt0_page2 puts data+stack in the
-      allocated WIN2), so code caps at ~15.5 KB. When code approaches it, switch
-      to the SDK "Default Layout" (32 KB WIN1+WIN2): code 0x4100 spanning into
-      WIN2, data+stack high. Needs (a) a custom crt0 that zeroes _DATA but does
-      NOT GETMEM (default crt0 only clears _BSS, and our globals live in _DATA),
-      and (b) padding the loaded image to >=16 KB so DSS maps 2 pages (the WIN2
-      page is only "owned" if the image reaches it). Deferred until needed.
-      Beyond 32 KB: overlays / dss_getmem_pages + setwin_page, or --codeseg banking.
-- [ ] Stage 7: NE2000 backend behind net.h; packaging + docs.
+## Not doing (intentionally — ZX cosmetic / low value on Sprinter)
+Themes, sound (beep/click), copy/paste, in-buffer search, traffic meter, timezone
+command, nick-colour config, the SD-loaded overlay engine (screens are resident).
