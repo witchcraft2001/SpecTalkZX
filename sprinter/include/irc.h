@@ -12,7 +12,7 @@
 
 #include <sprinter.h>
 
-#define MAX_WIN  10
+#define MAX_WIN  11    /* index 0 = server, 1..10 = channels/queries (Alt+1..9,0) */
 
 void irc_init(const char *nick);
 
@@ -42,6 +42,12 @@ void irc_quit(void);
 /* window navigation */
 void irc_next_window(void);
 void irc_prev_window(void);
+void irc_select_chan(u8 n);                /* Alt+digit: 1..9 -> win 1..9, 0 -> win 10 */
+
+/* recent-nick roster (for Tab completion) */
+u8          irc_nick_n(void);              /* number of remembered nicks */
+const char *irc_nick_at(u8 i);             /* i-th remembered nick (0 = most recent) */
+void        irc_list_nicks(void);          /* /nicks: dump the roster (diagnostic) */
 void irc_scroll_up(void);     /* PgUp: older history in the current window */
 void irc_scroll_down(void);   /* PgDn: newer history / back to live */
 

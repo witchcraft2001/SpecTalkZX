@@ -20,6 +20,7 @@
 #define K_ENTER 0x0D
 #define K_BS    0x08
 #define K_TAB   0x09
+#define SC_TAB   0x0F
 #define SC_LEFT  0x54
 #define SC_RIGHT 0x56
 #define SC_UP    0x58
@@ -132,6 +133,117 @@ static void gen_nick(char *o) {
     o[7] = 0;
 }
 
+/* ---- Tab autocompletion (commands after '/', else nicks) ----------- */
+static const char *const CMD_TBL[] = {
+    "server", "nick", "join", "query", "msg", "me", "id", "pass", "close",
+    "part", "quit", "win", "raw", "ignore", "away", "timestamp", "encoding",
+    "help", 0
+};
+static u8   comp_active;          /* mid completion cycle */
+static u16  comp_pos;             /* word start in inbuf */
+static u8   comp_cmd;             /* completing a command (vs a nick) */
+static u8   comp_idx;             /* last candidate inserted (0xFF = showed prefix) */
+static char comp_base[24];        /* the prefix the user originally typed */
+
+static u8 lc1(u8 c) { return (c >= 'A' && c <= 'Z') ? (u8)(c + 32) : c; }
+static u8 starts_ci(const char *s, const char *p) {
+    while (*p) { if (lc1((u8)*s) != lc1((u8)*p)) return 0; s++; p++; }
+    return 1;
+}
+static u8 cand_count(const char *pfx, u8 cmd) {
+    u8 n = 0, i;
+    if (cmd) { for (i = 0; CMD_TBL[i]; i++) if (starts_ci(CMD_TBL[i], pfx)) n++; }
+    else { u8 t = irc_nick_n(); for (i = 0; i < t; i++) if (starts_ci(irc_nick_at(i), pfx)) n++; }
+    return n;
+}
+/* copy the k-th candidate matching pfx into out[<=24] (irc_nick_at shares one
+ * buffer, so candidates must be copied out, not held by pointer) */
+static void cand_get(const char *pfx, u8 cmd, u8 k, char *out) {
+    u8 i, n = 0;
+    out[0] = 0;
+    if (cmd) { for (i = 0; CMD_TBL[i]; i++) if (starts_ci(CMD_TBL[i], pfx)) { if (n == k) { s_cpy(out, CMD_TBL[i], 24); return; } n++; } }
+    else { u8 t = irc_nick_n(); for (i = 0; i < t; i++) { const char *x = irc_nick_at(i); if (starts_ci(x, pfx)) { if (n == k) { s_cpy(out, x, 24); return; } n++; } } }
+}
+
+/* replace inbuf[from..incur) with text(+sep), preserving any tail after incur */
+static void put_word(u16 from, const char *text, const char *sep) {
+    u16 tlen = 0, slen = 0, add, tail, i;
+    while (text[tlen]) tlen++;
+    while (sep[slen]) slen++;
+    add = (u16)(tlen + slen);
+    tail = (u16)(inlen - incur);
+    if ((u16)(from + add + tail) > IN_MAX - 1) {
+        if ((u16)(from + add) > IN_MAX - 1) return;
+        tail = (u16)((IN_MAX - 1) - (from + add));
+    }
+    if (add > (u16)(incur - from)) { for (i = tail; i-- > 0;) inbuf[from + add + i] = inbuf[incur + i]; }
+    else { for (i = 0; i < tail; i++) inbuf[from + add + i] = inbuf[incur + i]; }
+    for (i = 0; i < tlen; i++) inbuf[from + i] = text[i];
+    for (i = 0; i < slen; i++) inbuf[from + tlen + i] = sep[i];
+    inlen = (u16)(from + add + tail);
+    incur = (u16)(from + add);
+}
+
+static void do_complete(void) {
+    u16 from, pstart;
+    u8 cmd, n, i, pl;
+    char prefix[24], cand[24];
+    const char *sep;
+
+    if (comp_active) {                              /* cycle to the next candidate */
+        n = cand_count(comp_base, comp_cmd);
+        if (n) {
+            comp_idx = (u8)((comp_idx + 1) % n);
+            cand_get(comp_base, comp_cmd, comp_idx, cand);
+            sep = comp_cmd ? " " : (comp_pos == 0 ? ": " : " ");
+            put_word(comp_pos, cand, sep);
+        }
+        return;
+    }
+
+    from = incur;
+    while (from > 0 && inbuf[from - 1] != ' ') from--;
+    pstart = from; cmd = 0;
+    if (pstart == 0 && inbuf[0] == '/') { cmd = 1; pstart = 1; }
+    pl = 0;
+    for (i = 0; (u16)(pstart + i) < incur && pl < (u8)(sizeof(prefix) - 1); i++) prefix[pl++] = inbuf[pstart + i];
+    prefix[pl] = 0;
+    if (pl == 0) { if (!cmd) term_notif("type a few letters, then Tab"); return; }
+
+    n = cand_count(prefix, cmd);
+    if (n == 0) { term_notif("no match"); return; }
+    sep = cmd ? " " : (pstart == 0 ? ": " : " ");
+    if (n == 1) { cand_get(prefix, cmd, 0, cand); put_word(pstart, cand, sep); return; }
+
+    /* multiple matches: extend to the longest common prefix, then arm cycling */
+    {
+        char lcp[24], ck[24]; u8 ll;
+        cand_get(prefix, cmd, 0, lcp);
+        for (ll = 0; lcp[ll]; ll++) ;
+        for (i = 1; i < n; i++) {
+            u8 j = 0;
+            cand_get(prefix, cmd, i, ck);
+            while (j < ll && lc1((u8)lcp[j]) == lc1((u8)ck[j])) j++;
+            ll = j; lcp[ll] = 0;
+        }
+        for (i = 0; i < pl; i++) comp_base[i] = prefix[i];
+        comp_base[pl] = 0;
+        comp_cmd = cmd; comp_pos = pstart; comp_active = 1;
+        if (ll > pl) { comp_idx = 0xFF; put_word(pstart, lcp, ""); }
+        else { comp_idx = 0; cand_get(prefix, cmd, 0, cand); put_word(pstart, cand, sep); }
+        {                                           /* list the candidates on the notif line */
+            char m[80]; u8 mp = 0, k;
+            for (k = 0; k < n && mp < 76; k++) {
+                u8 j = 0;
+                cand_get(prefix, cmd, k, ck);
+                while (ck[j] && mp < 78) m[mp++] = ck[j++];
+                if (mp < 78) m[mp++] = ' ';
+            }
+            m[mp] = 0; term_notif(m);
+        }
+    }
+}
+
 /* ---- commands ------------------------------------------------------ */
 static char *next_arg(char *s) {
     while (*s && *s != ' ') s++;
@@ -177,7 +289,10 @@ static void do_command(char *line) {
     } else if (starts(cmd, "quit")) {
         irc_quit(); term_notif("disconnected");
     } else if (starts(cmd, "win")) {
-        irc_next_window();
+        if (arg[0] >= '0' && arg[0] <= '9') irc_select_chan((u8)(arg[0] - '0'));  /* /win N */
+        else irc_next_window();
+    } else if (starts(cmd, "roster")) {
+        irc_list_nicks();
     } else if (starts(cmd, "raw")) {
         irc_raw(arg);
     } else if (starts(cmd, "ignore")) {
@@ -208,7 +323,8 @@ static void do_command(char *line) {
         irc_local("  /encoding (/enc)       - toggle UTF-8 <-> CP866");
         irc_local("  /whois /list /names... - any other /cmd is sent to the server");
         irc_local("  text                   - message current window");
-        irc_local("  TAB window, arrows/Home/End edit, Up/Down hist, PgUp/PgDn scroll");
+        irc_local("  Tab=complete (cmd/nick), Ctrl+Tab/Shift+Tab=window, Alt+1..0=channel");
+        irc_local("  arrows/Home/End edit, Up/Down input history, PgUp/PgDn scroll");
     } else {
         irc_send_cmd(cmd, arg);   /* forward unknown /cmd to the server (/whois, /list, ...) */
     }
@@ -300,7 +416,7 @@ void main(void) {
     } else {
         irc_local("Try:  /server irc.libera.chat   then  /join #test");
     }
-    term_notif("/help | /server <host> | /join #chan | TAB=window | ESC=exit");
+    term_notif("/help | Tab=complete | Ctrl/Shift+Tab=window | Alt+1..0=chan | ESC=exit");
     redraw();
 
     for (;;) {
@@ -325,7 +441,14 @@ void main(void) {
         term_clock();
 
         if (dss_testkey(&key)) {
+            u8 is_tab, plain_tab;
             dss_scankey(&consume);
+            /* With Ctrl/Alt held the keyboard reports ascii=0 and sets bit 0x80 in
+             * scan, so match Tab on the masked scan code too (fixes Ctrl+Tab). */
+            is_tab = (key.ascii == K_TAB) || ((key.scan & 0x7F) == SC_TAB);
+            plain_tab = is_tab && !(key.modifiers & (DSS_KEYMOD_LSHIFT | DSS_KEYMOD_RSHIFT |
+                        DSS_KEYMOD_CTRL | DSS_KEYMOD_LCTRL | DSS_KEYMOD_RCTRL));
+            if (!plain_tab) comp_active = 0;        /* any other key ends a completion cycle */
             if (quit_pending) {
                 quit_pending = 0;
                 if (key.ascii == K_ESC) break;
@@ -333,10 +456,11 @@ void main(void) {
                 continue;
             }
             if (key.ascii == K_ESC) { quit_pending = 1; term_notif("Press ESC again to quit, any other key to cancel"); }
-            else if (key.ascii == K_TAB || key.scan == 0x0F) {   /* Tab / Shift+Tab */
-                if (key.modifiers & (DSS_KEYMOD_LSHIFT | DSS_KEYMOD_RSHIFT)) irc_prev_window();
-                else irc_next_window();
-                redraw();
+            else if (is_tab) {                       /* Tab/Shift+Tab/Ctrl+Tab */
+                if (key.modifiers & (DSS_KEYMOD_LSHIFT | DSS_KEYMOD_RSHIFT)) { irc_prev_window(); redraw(); }
+                else if (key.modifiers & (DSS_KEYMOD_CTRL | DSS_KEYMOD_LCTRL | DSS_KEYMOD_RCTRL)) { irc_next_window(); redraw(); }
+                else if (inlen == 0) { irc_next_window(); redraw(); }   /* empty line: Tab cycles windows */
+                else { do_complete(); redraw(); }                       /* otherwise: complete */
             }
             else if (key.ascii == K_ENTER) { on_enter(); redraw(); }
             else if (key.ascii == K_BS) { del_before(); redraw(); }
@@ -348,6 +472,13 @@ void main(void) {
             else if (key.scan == SC_PGDN)  { irc_scroll_down(); redraw(); }
             else if (key.scan == SC_UP)    { if (ehbrowse > 0) { ehbrowse--; eh_load(ehbrowse); redraw(); } }
             else if (key.scan == SC_DOWN)  { if (ehbrowse < ehcount) { ehbrowse++; if (ehbrowse == ehcount) { inlen = 0; incur = 0; } else eh_load(ehbrowse); redraw(); } }
+            else if ((key.modifiers & (DSS_KEYMOD_ALT | DSS_KEYMOD_LALT | DSS_KEYMOD_RALT))
+                     && (key.scan & 0x7F) >= 0x02 && (key.scan & 0x7F) <= 0x0B) {
+                /* Alt+digit: ascii is 0, so use the scan code. PC set: 1..9,0 = 0x02..0x0B. */
+                u8 s7 = (u8)(key.scan & 0x7F);
+                irc_select_chan((u8)(s7 == 0x0B ? 0 : s7 - 1));   /* 1..9 -> win 1..9, 0 -> win 10 */
+                redraw();
+            }
             else if ((key.ascii >= 32 && key.ascii < 127) || key.ascii >= 0x80) { ins_char(key.ascii); redraw(); }
         }
     }

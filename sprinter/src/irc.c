@@ -56,6 +56,63 @@ static u8 istr(const char *h, const char *n) {            /* case-insensitive co
 static void s_cpy(char *d, const char *s, u8 max) { u8 i = 0; while (s[i] && i < (u8)(max - 1)) { d[i] = s[i]; i++; } d[i] = 0; }
 static u16 to_u16(const char *s) { u16 v = 0; while (*s >= '0' && *s <= '9') { v = (u16)(v * 10 + (*s - '0')); s++; } return v; }
 
+/* ---- nick roster (for Tab completion) ------------------------------
+ * Nicks seen across windows (PRIVMSG senders, JOINs, NAMES replies), kept in a
+ * dedicated DSS page so it holds a whole channel without eating resident RAM.
+ * Circular: oldest entry is overwritten once full. The page is mapped to WIN3
+ * only for the brief read/write, with no DSS calls in between (same discipline
+ * as hist.c). */
+#define NR_CAP  128             /* roster capacity */
+#define NR_LEN  20              /* bytes per nick slot */
+#define NR_WIN3 0xC000          /* page maps here */
+extern u8   dss_getmem(void);
+extern void dss_setwin(u8 win, u8 block);
+
+static u8   nr_page = 0xFF;     /* roster DSS page, 0xFF = none */
+static u8   nr_n;               /* nicks stored (0..NR_CAP) */
+static u8   nr_head;            /* next write slot (circular) */
+static char nr_buf[NR_LEN];     /* WIN2 staging for irc_nick_at() */
+
+static void nr_init(void) { nr_page = dss_getmem(); nr_n = 0; nr_head = 0; }
+
+static void nr_add(const char *nick) {
+    u8 i; char c = nick[0]; char *d;
+    if (nr_page == 0xFF) return;
+    if (!c || c == '#' || c == '&') return;
+    if (mynick[0] && ieq(nick, mynick)) return;        /* skip our own nick */
+    dss_setwin(3, nr_page);                            /* map; no DSS calls below */
+    for (i = 0; i < nr_n; i++)                          /* dedup */
+        if (ieq((const char *)(NR_WIN3 + (u16)i * NR_LEN), nick)) return;
+    d = (char *)(NR_WIN3 + (u16)nr_head * NR_LEN);
+    { u8 j = 0; while (nick[j] && j < NR_LEN - 1) { d[j] = nick[j]; j++; } d[j] = 0; }
+    nr_head = (u8)((nr_head + 1) % NR_CAP);
+    if (nr_n < NR_CAP) nr_n++;
+}
+
+/* parse a RPL_NAMREPLY (353) names list and add each nick (strip @+~%& prefix) */
+static void nr_add_names(const char *p) {
+    char nb[NR_LEN]; u8 j;
+    while (*p) {
+        while (*p == ' ') p++;
+        if (*p == '@' || *p == '+' || *p == '~' || *p == '%' || *p == '&') p++;
+        j = 0; while (*p && *p != ' ' && j < NR_LEN - 1) nb[j++] = *p++;
+        nb[j] = 0;
+        while (*p && *p != ' ') p++;
+        if (nb[0]) nr_add(nb);
+    }
+}
+
+u8 irc_nick_n(void) { return nr_n; }
+const char *irc_nick_at(u8 i) {                         /* copies the slot into nr_buf */
+    const char *s; u8 j = 0;
+    if (i >= nr_n || nr_page == 0xFF) { nr_buf[0] = 0; return nr_buf; }
+    dss_setwin(3, nr_page);
+    s = (const char *)(NR_WIN3 + (u16)i * NR_LEN);
+    while (s[j] && j < NR_LEN - 1) { nr_buf[j] = s[j]; j++; }
+    nr_buf[j] = 0;
+    return nr_buf;
+}
+
 /* ---- output line builder ------------------------------------------ */
 static char  out[480];   /* must hold "<nick> " + a full ~400-char message */
 static char *ob;
@@ -79,7 +136,8 @@ static void status_refresh(void) {
     for (i = 0; i < MAX_WIN; i++) {
         if (!(win[i].flags & F_ACTIVE)) continue;
         if (i == wcur) o_c('>');
-        o_c((char)('0' + i));
+        if (i == 0) o_c('S');                       /* server */
+        else o_c((char)(i == 10 ? '0' : ('0' + i))); /* channels 1..9, 10 shown as 0 */
         if (win[i].flags & F_MENTION) o_c('!');
         else if (win[i].flags & F_UNREAD) o_c('*');
         o_c(' ');
@@ -238,8 +296,10 @@ static void h_privmsg(const char *usr, char *target, char *txt, u8 is_notice) {
     /* server NOTICEs (sender is a server host, or target '*'/'AUTH') -> server window */
     if (is_notice && (target[0] == '*' || has_dot(usr)))
         w = 0;
-    else
+    else {
         w = route_win(usr, target);
+        if (!has_dot(usr)) nr_add(usr);     /* remember the speaker for Tab completion */
+    }
     mention = (target[0] == '#' && mynick[0] && istr(txt, mynick));
 
     o_init();
@@ -266,6 +326,7 @@ static void h_join(const char *usr, char *chan) {
         w = win_find(chan);
         if (w >= 0) {
             win[(u8)w].users++;
+            nr_add(usr);                         /* roster for Tab completion */
             o_init(); o_str("--> "); o_str(usr); o_str(" joined"); o_end();
             win_print(w, out);
         }
@@ -326,6 +387,7 @@ static void h_numeric(u16 n, const char *txt) {
         win_print(w, out);
     } else if (n == 353) {                            /* RPL_NAMREPLY: <me> = #chan :nicks */
         w = win_find(arg(2));
+        nr_add_names(txt);                            /* feed the Tab-completion roster */
         o_init(); o_str("* users: "); o_str(txt); o_end();
         win_print(w, out);
     } else if (n == 366 || n == 333) {
@@ -430,6 +492,7 @@ void irc_init(const char *nick) {
     u8 i;
     for (i = 0; i < MAX_WIN; i++) { win[i].flags = 0; win[i].name[0] = 0; win[i].users = 0; }
     hist_init();
+    nr_init();                              /* allocate the Tab-completion roster page */
     s_cpy(mynick, nick, sizeof(mynick));
     s_cpy(win[0].name, "(server)", WIN_NAME);
     win[0].flags = F_ACTIVE | F_SERVER;
@@ -496,6 +559,15 @@ void irc_keepalive(void) {
 const char *irc_nick_str(void) { return mynick; }
 
 void irc_local(const char *line) { win_print((i8)wcur, line); }   /* local note -> current window */
+
+/* /nicks: dump the completion roster to the current window (diagnostic) */
+void irc_list_nicks(void) {
+    u8 i;
+    o_init(); o_str("* roster ("); o_c((char)('0' + nr_n / 10)); o_c((char)('0' + nr_n % 10)); o_str("): ");
+    for (i = 0; i < nr_n; i++) { o_str(irc_nick_at(i)); o_c(' '); }
+    o_end();
+    win_print((i8)wcur, out);
+}
 
 void irc_set_nick(const char *n) {
     s_cpy(mynick, n, sizeof(mynick));
@@ -653,3 +725,10 @@ static void cycle(i8 dir) {
 }
 void irc_next_window(void) { cycle(1); }
 void irc_prev_window(void) { cycle(-1); }
+
+/* Alt+<digit> quick select: 1..9 -> window 1..9, 0 -> window 10 (the 10th). */
+void irc_select_chan(u8 n) {
+    u8 idx = (u8)(n == 0 ? 10 : n);
+    if (idx < MAX_WIN && (win[idx].flags & F_ACTIVE)) win_switch(idx);
+    else term_notif("no such window");
+}

@@ -71,7 +71,9 @@ server as-is.
 ## Keys
 
 ```
-Tab / Shift+Tab   next / previous window
+Tab               autocomplete a command (after /) or a recent nick
+Ctrl+Tab / Shift+Tab   next / previous window
+Alt+1..9, Alt+0   jump to channel 1..9 / 10
 PgUp / PgDn       scroll history up / down
 Up / Down         recall previous input lines
 Left/Right/Home/End   edit the input line

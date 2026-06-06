@@ -48,7 +48,14 @@ To change your nick: `/nick NewName`.
 ## 4. Channels and windows
 
 - **Join:** `/join #sprinter` — opens a new window and switches to it.
-- **Switch windows:** **Tab** (next) and **Shift+Tab** (previous).
+- **Switch windows:** **Ctrl+Tab** (next) and **Shift+Tab** (previous).
+- **Jump to a channel:** **Alt+1..Alt+9**, and **Alt+0** for the 10th. Channels are
+  numbered from 1 in the status bar (the server window shows as `S`).
+- **Tab** completes: after `/` it completes a **command**; otherwise it completes
+  a **nick** of someone you've recently seen (so you can quickly start a `/msg`
+  or address someone). If several match, the first Tab fills the common prefix
+  and lists the candidates on the notice line; press Tab again to cycle through
+  them.
 - **Leave:** `/part` leaves the channel in the current window.
 - **Close:** `/close` closes the current window — `/part`s it first if it is a
   channel, or just closes a private window. (The server window can't be closed.)

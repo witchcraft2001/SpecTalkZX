@@ -1,32 +1,21 @@
 # SpecTalk Sprinter port — TODO
 
-## Navigation & autocompletion rework (proposed)
+## Navigation & autocompletion rework
 
-Goal: free **Tab** for autocompletion by moving window switching to other keys.
-
-- [ ] Window switching:
-        * **Ctrl+Tab** = next window (forward)
-        * **Shift+Tab** = previous window (reverse)
-      (Tab alone stops switching windows — reserved for completion below.)
-- [ ] Quick channel select: **Alt+<digit>**. Number channels from **1**; the
-      digit **0 = the 10th** channel (Alt+1..Alt+9, Alt+0). Open question: window
-      0 is currently the server window. Decide the mapping — e.g. keep server as a
-      separate slot (Alt+`/Esc-to-server?) and number only channels/queries 1..10,
-      which means MAX_WIN must hold server + 10 (today MAX_WIN=10 includes server).
-      Update the status-bar window list to match the 1-based numbering.
-- [ ] **Tab = autocompletion** for two contexts:
-        * at the start of the line after `/` → complete **command** names;
-        * elsewhere → complete **nicks** from the current channel's member roster
-          (requires the per-channel nick list — see below).
-      Collision handling (multiple candidates share the typed prefix), suggested:
-        1. First Tab completes to the **longest common prefix** of all matches.
-        2. If still ambiguous, repeated Tab **cycles** through the candidates
-           (insert each in turn); show the candidate list on the notif line.
-        3. A nick completion at the start of a line may append a separator
-           (e.g. ": ") like common clients; mid-line just inserts the nick.
-- [ ] Prerequisite for nick completion: maintain a **per-channel member roster**
-      (from RPL_NAMREPLY 353/366 + JOIN/PART/QUIT/KICK/NICK), bounded in size
-      (e.g. last ~40 active nicks; store in a DSS page like history if needed).
+- [x] Window switching: **Ctrl+Tab** = next, **Shift+Tab** = prev (Tab freed).
+- [x] Quick channel select **Alt+<digit>**: Alt+1..9 -> window 1..9, Alt+0 -> the
+      10th. MAX_WIN raised to 11 (index 0 = server, 1..10 = channels/queries).
+      Status bar renumbered: server shows as `S`, channels 1..9, 10 shown as `0`.
+- [x] **Tab = autocompletion**: after `/` -> command names; otherwise -> nicks.
+      Collision handling: first Tab fills the longest common prefix and lists the
+      candidates on the notif line; repeated Tab cycles through them. Nick at the
+      start of a line gets a ": " separator, mid-line a space.
+- [~] Nick roster is currently a **global recent-nick ring** (NR_MAX=16), fed by
+      PRIVMSG senders + JOINs + RPL_NAMREPLY (353). Memory-cheap but NOT
+      per-channel and bounded. POSSIBLE UPGRADE: a true per-channel roster
+      (full NAMES + JOIN/PART/QUIT/KICK/NICK upkeep) in a DSS page, if we want to
+      complete silent/lurking users and scope by channel. (Code headroom is now
+      ~2.2 KB — a bigger roster likely needs the DSS-page approach, not RAM.)
 
 ## Legacy cleanup (de-ZX-ification)
 

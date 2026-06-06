@@ -4,7 +4,7 @@
 #include "hist.h"
 #include "term.h"
 
-#define MAX_WIN  10
+#define MAX_WIN  11              /* must match irc.h */
 #define WIN3     0xC000          /* page maps here */
 #define SLOT     80             /* bytes per stored line */
 #define NSLOTS   204            /* 16384 / 80 */
