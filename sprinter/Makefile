@@ -82,6 +82,12 @@ $(BUILD)/%.rel: $(SRCDIR)/%.c
 	@mkdir -p $(@D)
 	$(SDCC) $(CFLAGS) -c -o $@ $<
 
+# main.c carries the APP_BUILD (__DATE__/__TIME__) banner stamp; rebuild it every
+# run so the stamp reflects the actual build, not the last time main.c changed.
+.PHONY: FORCE
+FORCE:
+$(BUILD)/main.rel: FORCE
+
 # Local crt0 (flat WIN1+WIN2 layout), assembled from sprinter/crt0_flat.s
 $(BUILD)/crt0_flat.rel: crt0_flat.s
 	@mkdir -p $(@D)

@@ -11,6 +11,11 @@
 
 #define APP_NAME    "SprinTalk"
 #define APP_VER     "0.1"
+#define APP_AUTHOR  "Dmitry Mikhalchenkov (SprinterTeam)"
+
+/* Compiler-stamped build date/time. Only fresh in the translation unit being
+ * compiled, so the Makefile force-rebuilds main.c (which prints it) every build. */
+#define APP_BUILD   __DATE__ " " __TIME__
 
 #ifndef APP_BACKEND
 #define APP_BACKEND "ESP"

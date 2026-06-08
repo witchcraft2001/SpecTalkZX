@@ -32,6 +32,70 @@ static void at(const char *cmd, u8 secs) {
     quiet(secs);
 }
 
+/* Wait for the ESP's transparent-mode ">" prompt after AT+CIPSEND, reading ONE
+ * byte at a time and stopping the instant ">" is seen. Unlike quiet() (which
+ * discards for a fixed time), this leaves every byte AFTER the prompt in the
+ * FIFO/ESP — that tail is the server's first burst (the connect NOTICEs), which
+ * a blind quiet() would have eaten, starting the IRC stream mid-line. Returns 1
+ * if the prompt was seen, 0 on ~secs timeout. */
+static u8 wait_prompt(u8 secs) {
+    dss_time_t t;
+    u8 last, k = 0, b;
+    dss_gettime(&t); last = t.second;
+    while (k < secs) {
+        if (uart_drain(&b, 1) == 1) {
+            if (b == '>') return 1;          /* prompt: leave the server tail for net_poll */
+        } else {
+            dss_gettime(&t);
+            if (t.second != last) { last = t.second; k++; term_clock(); }
+        }
+    }
+    return 0;
+}
+
+static u8 streq(const char *a, const char *b) {
+    while (*a && *b) { if (*a != *b) return 0; a++; b++; }
+    return *a == *b;
+}
+
+/* Discard whatever RX is pending right now (stale AT residue before a command). */
+static void flush_rx(void) { uart_drain(scratch, sizeof(scratch)); }
+
+/* Wait for an AT result line, reading byte-by-byte and matching whole CRLF lines.
+ * Unlike quiet() (fixed-time blind discard) this keys off the actual ESP reply,
+ * so slow/backlogged responses don't leak into the IRC stream as "OK"/"ERROR"
+ * noise, and a genuine failure is detected instead of assumed-success.
+ * Returns: 0 = OK, 1 = ERROR/FAIL/ALREADY CONNECTED, 2 = timeout (~secs). */
+#define ESP_OK      0
+#define ESP_ERR     1
+#define ESP_TIMEOUT 2
+static u8 esp_expect(u8 secs) {
+    dss_time_t t;
+    u8 last, k = 0, b, rlen = 0;
+    char rline[20];
+    dss_gettime(&t); last = t.second;
+    while (k < secs) {
+        if (uart_drain(&b, 1) == 1) {
+            if (b == '\r' || b == '\n') {
+                rline[rlen] = 0;
+                if (rlen) {
+                    if (streq(rline, "OK") || streq(rline, "SEND OK")) return ESP_OK;
+                    if (streq(rline, "ERROR") || streq(rline, "FAIL")
+                        || streq(rline, "ALREADY CONNECTED") || streq(rline, "CLOSED"))
+                        return ESP_ERR;
+                }
+                rlen = 0;
+            } else if (rlen < sizeof(rline) - 1) {
+                rline[rlen++] = (char)b;
+            }
+        } else {
+            dss_gettime(&t);
+            if (t.second != last) { last = t.second; k++; term_clock(); }
+        }
+    }
+    return ESP_TIMEOUT;
+}
+
 /* back to command mode + drop any leftover socket */
 static void esp_reset(void) {
     quiet(1);                 /* silence before escape (guard ~1s, plenty) */
@@ -117,16 +181,38 @@ i8 net_connect(const char *host, const char *port) {
     esp_reset();
     cm = 0;
     ever_used = 1;            /* from here the ESP needs CIPMODE restored on exit */
-    at("AT+CIPMUX=0", 1);
-    at("AT+CIPMODE=1", 1);
-    /* AT+CIPSTART="TCP","<host>",<port> */
+
+    /* Each step waits for the ESP's actual reply (OK/ERROR/prompt) instead of a
+     * blind fixed delay: a slow/backlogged ESP no longer leaks its responses into
+     * the IRC stream, and a real failure is reported instead of assumed-success
+     * (which used to wedge the UI at "connecting..." forever). CIPMUX/CIPMODE may
+     * report ERROR if already set — harmless, so we don't fail on them. */
+    flush_rx();
+    uart_tx_str("AT+CIPMUX=0\r\n");  esp_expect(2);
+    flush_rx();
+    uart_tx_str("AT+CIPMODE=1\r\n"); esp_expect(2);
+
+    flush_rx();
     uart_tx_str("AT+CIPSTART=\"TCP\",\"");
     uart_tx_str(host);
     uart_tx_str("\",");
     uart_tx_str(port);
     uart_tx_str("\r\n");
-    quiet(6);                 /* DNS resolve + TCP connect */
-    at("AT+CIPSEND", 2);      /* ">" prompt -> raw byte pipe */
+    if (esp_expect(15) != ESP_OK) {  /* DNS resolve + TCP connect; CONNECT then OK */
+        connected = 0;
+        return NET_NO_LINK;          /* DNS/connect failed or timed out */
+    }
+
+    /* Enter the raw byte pipe and stop exactly at the ">" prompt so the server's
+     * first burst (connect NOTICEs) survives for the main loop instead of being
+     * discarded. The CIPSEND reply is "OK\r\n>" — wait_prompt skips past the OK
+     * and stops at '>', so neither the OK nor the prompt leak into the stream. */
+    flush_rx();
+    uart_tx_str("AT+CIPSEND\r\n");
+    if (!wait_prompt(3)) {
+        connected = 0;
+        return NET_NO_LINK;          /* never got the data prompt */
+    }
     connected = 1;
     return NET_OK;
 }
@@ -141,6 +227,11 @@ u16 net_poll(u8 *buf, u16 max) {
     return n;
 }
 
+/* Manual RX flow control: drop/raise RTS around the slow render so the ESP holds
+ * its TX for the whole render instead of overrunning the FIFO (see uart.c). */
+void net_rx_pause(void)  { uart_rx_pause(); }
+void net_rx_resume(void) { uart_rx_resume(); }
+
 /* Close the link. Restores the ESP whenever we ever entered transparent mode —
  * even if the socket is already gone (timeout/CLOSED), so CIPMODE is always put
  * back to 0 before we hand the card to the next program. */
@@ -153,3 +244,6 @@ u8 net_is_connected(void) { return connected; }
 
 u8 net_stalled(void) { return uart_stalled(); }
 void net_clear_stall(void) { uart_clear_stall(); }
+
+u8 net_overrun(void) { return uart_overrun(); }
+void net_clear_overrun(void) { uart_clear_overrun(); }

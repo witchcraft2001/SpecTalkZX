@@ -18,6 +18,9 @@
 
 #define LSR_DR   0x01    /* data ready */
 #define LSR_THRE 0x20    /* transmit holding register empty */
+/* RX error bits in LSR: overrun / parity / framing / break. Any of these means
+ * the byte stream is corrupt/misaligned and (over TCP) unrecoverable. */
+#define LSR_ERRMASK 0x1E /* OE | PE | FE | BI */
 
 #define MCR_AFE  0x20    /* auto flow control enable */
 #define MCR_RTS  0x02    /* request to send (asserted = ESP may transmit) */
@@ -30,6 +33,13 @@
 u8 uart_tx_stall;
 u8 uart_stalled(void) { return uart_tx_stall; }
 void uart_clear_stall(void) { uart_tx_stall = 0; }
+
+/* Sticky OR of LSR error bits seen since the last clear. An overrun here means
+ * uart_drain lost RX bytes (the slow render outran the FIFO) -> the IRC parser
+ * is now desynced; the caller resyncs/warns instead of trusting corrupt data. */
+u8 uart_rx_err;
+u8 uart_overrun(void) { return uart_rx_err; }
+void uart_clear_overrun(void) { uart_rx_err = 0; }
 
 static u8 streq(const char *a, const char *b) {
     while (*a && *b) { if (*a != *b) return 0; a++; b++; }
@@ -49,16 +59,19 @@ u8 uart_divisor(const char *baud) {
 
 void uart_init(u8 divisor) {
     uart_tx_stall = 0;
+    uart_rx_err = 0;
     isa_open();
-    /* FIFO on + RX trigger level 4 (FCR bits7:6 = 01). With AFE auto-flow the UART
-     * deasserts RTS once >=4 bytes sit in the RX FIFO, so during a slow render (when
-     * net_poll isn't draining) RTS stays low and the ESP (flow=3, set by NETUP) is
-     * held off for the WHOLE render — no overrun, with 12 bytes of in-flight headroom.
-     * Trigger 8 left only 8 bytes and a slow-reacting ESP overran (lost MOTD chunks);
-     * trigger 1 fixed that but throttled bursts, so 4 is the speed/safety compromise.
-     * We do NOT toggle RTS manually: forcing MCR bit1 low wedged RX on real HW;
-     * letting AFE drive RTS off the FIFO level is the mechanism that already worked. */
-    *U_FCR = 0x47;          /* FIFO enable + flush RX/TX + RX trigger 4 */
+    /* FIFO on + RX trigger level 8 (FCR bits7:6 = 10), matching the SprinterWiFi
+     * ftp/wget driver. The FIFO trigger alone is NOT relied on to survive a slow
+     * render: the caller now drops RTS manually (uart_rx_pause) for the whole
+     * render and raises it again (uart_rx_resume) right before draining, so the
+     * ESP (flow=3, set by NETUP) is held off for the entire slow path — not just
+     * the few FIFO byte-times of headroom. With the manual pause in place the
+     * trigger only governs burst size between drains, so TR8 (faster bursts) is
+     * safe where it overran before (that earlier overrun was the render outrunning
+     * the FIFO with NO manual pause). Pausing keeps AFE enabled and only clears
+     * the RTS bit — the proven recipe from esplib.asm UART_RX_PAUSE/RESUME. */
+    *U_FCR = 0x87;          /* FIFO enable + flush RX/TX + RX trigger 8 */
     *U_IER = 0x00;          /* no interrupts */
     *U_LCR = 0x83;          /* DLAB | 8N1 */
     *U_DLL = divisor;
@@ -82,8 +95,34 @@ void uart_tx_str(const char *s) {
 
 u16 uart_drain(u8 *buf, u16 max) {
     u16 n = 0;
+    u8 lsr;
     isa_open();
-    while (n < max && (*U_LSR & LSR_DR)) buf[n++] = *U_RBR;
+    /* Read LSR once per byte: it carries both Data-Ready and the sticky error
+     * bits, and reading it clears OE. Accumulate any error so a render-induced
+     * overrun is detectable after the fact (see uart_overrun). */
+    for (;;) {
+        lsr = *U_LSR;
+        uart_rx_err |= (u8)(lsr & LSR_ERRMASK);
+        if (n >= max || !(lsr & LSR_DR)) break;
+        buf[n++] = *U_RBR;
+    }
     isa_close();
     return n;
+}
+
+/* Manual RX flow control (mirrors esplib.asm UART_RX_PAUSE/RESUME). Drop RTS
+ * before any slow, non-draining work (rendering): with AFE still on, clearing
+ * the RTS bit deasserts the line and the ESP pauses its TX. Raise RTS again just
+ * before draining. This gives the ESP the whole slow path to stop, instead of
+ * only the FIFO headroom — the fix for lost messages during channel renders. */
+void uart_rx_pause(void) {
+    isa_open();
+    *U_MCR = MCR_AFE;            /* RTS low, auto-flow still enabled */
+    isa_close();
+}
+
+void uart_rx_resume(void) {
+    isa_open();
+    *U_MCR = MCR_AFE | MCR_RTS;  /* RTS high: ESP may transmit again */
+    isa_close();
 }

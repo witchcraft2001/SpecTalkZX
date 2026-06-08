@@ -260,9 +260,12 @@ static void do_command(char *line) {
         if (!host[0]) { term_notif("usage: /server <host> [port]"); return; }
         if (!port[0]) port = "6667";
         term_notif("connecting...");
-        irc_connect(host, port);
-        cfg_add_server(&S, host, port);     /* remember it (recent-server list) */
-        save_settings();
+        if (irc_connect(host, port) == NET_OK) {
+            cfg_add_server(&S, host, port); /* remember it (recent-server list) */
+            save_settings();
+        } else {
+            term_notif("connect failed - check link/server, try again");
+        }
     } else if (starts(cmd, "nick")) {
         if (arg[0]) { irc_set_nick(arg); save_settings(); }
     } else if (starts(cmd, "join")) {
@@ -353,6 +356,9 @@ void main(void) {
     irc_init(S.nick);
     irc_set_nspass(S.nspass);                             /* enable NickServ auto-identify */
 
+    irc_local(APP_TITLE " by " APP_AUTHOR);               /* startup banner: author + build */
+    irc_local("build " APP_BUILD);
+
     inlen = 0; incur = 0;
     eh_init();
     for (i = 0; i < IN_MAX; i++) inbuf[i] = 0;
@@ -422,8 +428,19 @@ void main(void) {
     redraw();
 
     for (;;) {
+        /* RX flow control (mirrors the SprinterWiFi ftp/wget driver): raise RTS,
+         * drain the ESP's burst, then drop RTS so the ESP holds its TX for the
+         * whole slow render below. Without this the render outran the FIFO and
+         * lost messages, desyncing the IRC state (broken /join). See uart.c. */
+        net_rx_resume();
         n = net_poll(rxb, sizeof(rxb));   /* drain UART first, before slower work */
+        net_rx_pause();
         if (n) irc_feed(rxb, n);
+
+        if (net_overrun()) {              /* RX overran anyway -> bytes lost, state may be off */
+            net_clear_overrun();
+            term_notif("WARNING: link overrun, some messages may be lost");
+        }
 
         if (was_conn && !irc_connected()) {   /* link dropped (ESP reported CLOSED) */
             irc_on_disconnect();

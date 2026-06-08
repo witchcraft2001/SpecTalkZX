@@ -204,6 +204,7 @@ static u8 is_ignored(const char *nick) {
 static void win_print(i8 idx, const char *line) {
     u8 w;
     char *o = tsbuf;
+    char *body;
     const u8 *p = (const u8 *)line;
     const char *end = tsbuf + sizeof(tsbuf) - 1;
     if (idx < 0) idx = 0;
@@ -215,6 +216,7 @@ static void win_print(i8 idx, const char *line) {
         *o++ = ':'; *o++ = (char)('0' + (t.minute / 10) % 10); *o++ = (char)('0' + t.minute % 10);
         *o++ = ']'; *o++ = ' ';
     }
+    body = o;                            /* content begins here (after the timestamp) */
     while (*p && o < end) {
         u8 c = *p++;
         if (c == 0x03) {                 /* colour: optional N[,M] digits */
@@ -231,6 +233,13 @@ static void win_print(i8 idx, const char *line) {
         *o++ = (char)c;
     }
     *o = 0;
+    /* Drop lines that render to nothing but a timestamp. These are ESP transport
+     * tokens that leak into the stream right after connect ("OK", "CONNECT": no
+     * IRC params, so dispatch's unknown-command branch hands us an empty body) —
+     * they showed as blank [HH:MM] lines before the first server message. Real
+     * empty IRC content is already filtered upstream (h_privmsg drops empty text;
+     * blank MOTD lines carry a "-"), so nothing legitimate is lost here. */
+    if (o == body) return;
     hist_add(w, tsbuf, (u8)(w == wcur && hist_is_live(w)));
     if (w != wcur) { win[w].flags |= F_UNREAD; status_refresh(); }
 }
@@ -442,7 +451,15 @@ static void dispatch(char *usr, char *cmd, char *par, char *txt) {
     } else if (cmd[0] >= '0' && cmd[0] <= '9') {
         h_numeric(to_u16(cmd), txt);
     } else {
-        win_print((i8)wcur, par);     /* unknown: show raw-ish */
+        /* unknown command: show the whole line (cmd + params + text), not just
+         * params — a bare "par" hid which command it was and rendered confusing
+         * fragments (e.g. a stray "NOTICE") when a line arrived malformed. */
+        o_init();
+        o_str(cmd);
+        if (par[0]) { o_c(' '); o_str(par); }
+        if (txt[0]) { o_c(' '); o_str(txt); }
+        o_end();
+        win_print((i8)wcur, out);
     }
 }
 
