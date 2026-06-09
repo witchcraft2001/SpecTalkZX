@@ -25,7 +25,7 @@ SprinTalk is built for a specific network card; the build tag tells you which:
 - A Sprinter with DSS and the SprinterWiFi (ESP) card set up.
 - `SPTALK.EXE` from the delivery package, copied onto your Sprinter (disk, CF/SD
   card, hard drive — wherever you run programs from). `SPTALK.TXT` (this file) and
-  `SPTHOWTO.TXT` (the how-to) are documentation.
+  `HOWTO.TXT` / `HOWTO_RU.TXT` (the how-to) are documentation.
 - Network already brought up by **NETUP** (see below). SprinTalk reads the
   connection settings published by NETUP, so it needs **no config file of its own**.
 
@@ -80,12 +80,14 @@ Left/Right/Home/End   edit the input line
 Esc               quit (press twice)
 ```
 
-See **SPTHOWTO.TXT** for a fuller walkthrough (channels, private messages,
-hiding your IP with a NickServ cloak, encoding, troubleshooting).
+See **HOWTO.TXT** or **HOWTO_RU.TXT** for a fuller walkthrough (channels,
+private messages, hiding your IP with a NickServ cloak, encoding,
+troubleshooting).
 
 ## Also in the package
 
-- `SPTHOWTO.TXT` — the full how-to guide.
+- `HOWTO.TXT` — the full how-to guide.
+- `HOWTO_RU.TXT` — the same guide in Russian (CP866).
 
 ---
 SprinTalk is free software, provided as-is. Based on SpecTalk ZX.

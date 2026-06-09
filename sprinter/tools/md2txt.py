@@ -9,7 +9,8 @@ README/HOWTO so the result reads cleanly in a DOS/Sprinter text viewer.
   * [text](url)  -> text (url)
   * bullet "- " / "* "  -> "  - "
   * fenced ``` code blocks -> kept verbatim (fence lines dropped)
-Output uses CRLF line endings and ASCII only (smart punctuation folded).
+Output uses CRLF line endings. By default it writes ASCII only; pass `cp866`
+as the optional third argument to keep Cyrillic for Sprinter/DOS text files.
 """
 import sys
 import re
@@ -21,10 +22,14 @@ SMART = {
 }
 
 
-def fold(s):
+def fold_smart(s):
     for k, v in SMART.items():
         s = s.replace(k, v)
-    return ''.join(c if ord(c) < 128 else '?' for c in s)
+    return s
+
+
+def fold_ascii(s):
+    return ''.join(c if ord(c) < 128 else '?' for c in fold_smart(s))
 
 
 def inline(s):
@@ -37,8 +42,9 @@ def inline(s):
     return s
 
 
-def convert(md):
+def convert(md, ascii_only=True):
     out, in_code = [], False
+    fold = fold_ascii if ascii_only else fold_smart
     for line in md.splitlines():
         if line.strip().startswith('```'):
             in_code = not in_code
@@ -74,13 +80,15 @@ def convert(md):
 
 
 def main():
-    if len(sys.argv) != 3:
-        print('usage: md2txt.py <in.md> <out.txt>', file=sys.stderr)
+    if len(sys.argv) not in (3, 4):
+        print('usage: md2txt.py <in.md> <out.txt> [encoding]', file=sys.stderr)
         sys.exit(2)
+    enc = sys.argv[3] if len(sys.argv) == 4 else 'ascii'
+    ascii_only = enc.lower() in ('ascii', 'us-ascii')
     with open(sys.argv[1], encoding='utf-8') as f:
         md = f.read()
-    with open(sys.argv[2], 'w', newline='') as f:
-        f.write(convert(md))
+    with open(sys.argv[2], 'w', encoding=enc, errors='replace', newline='') as f:
+        f.write(convert(md, ascii_only=ascii_only))
 
 
 if __name__ == '__main__':

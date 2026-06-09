@@ -5,8 +5,8 @@
 #  Targets:
 #    make            Build all .EXE files (SprinTalk -> SPTALK.EXE)
 #    make deploy      Build + write a FAT12 floppy (distr/sptalk.img) with the
-#                     EXEs, sample NET.CFG, and plain-text docs (SPTALK.TXT,
-#                     SPTHOWTO.TXT, converted from README.md / HOWTO.md)
+#                     EXEs and plain-text docs (SPTALK.TXT, HOWTO.TXT,
+#                     HOWTO_RU.TXT, converted from README.md / HOWTO*.md)
 #    make clean       Remove build artifacts
 #
 #  Verify in MAME:
@@ -64,8 +64,10 @@ DEPLOY_IMG ?= $(DISTR)/sptalk.img
 # Markdown docs -> plain text (DOS 8.3 names) for the package / test image
 DOC_README = README.md
 DOC_HOWTO  = HOWTO.md
+DOC_HOWTO_RU = HOWTO_RU.md
 TXT_README = $(BUILD)/SPTALK.TXT
-TXT_HOWTO  = $(BUILD)/SPTHOWTO.TXT
+TXT_HOWTO  = $(BUILD)/HOWTO.TXT
+TXT_HOWTO_RU = $(BUILD)/HOWTO_RU.TXT
 
 # Release zip
 DIST_VER ?= 0.1
@@ -130,24 +132,28 @@ $(TXT_README): $(DOC_README) tools/md2txt.py
 $(TXT_HOWTO): $(DOC_HOWTO) tools/md2txt.py
 	@mkdir -p $(@D)
 	$(PYTHON) tools/md2txt.py $(DOC_HOWTO) $@
+$(TXT_HOWTO_RU): $(DOC_HOWTO_RU) tools/md2txt.py
+	@mkdir -p $(@D)
+	$(PYTHON) tools/md2txt.py $(DOC_HOWTO_RU) $@ cp866
 
 # FAT12 test floppy (for run.sh / MAME): SprinTalk + plain-text docs. mtools req.
-deploy: SPTALK.EXE $(TXT_README) $(TXT_HOWTO)
+deploy: SPTALK.EXE $(TXT_README) $(TXT_HOWTO) $(TXT_HOWTO_RU)
 	@mkdir -p $(DISTR)
 	dd if=/dev/zero of=$(DEPLOY_IMG) bs=512 count=2880 2>/dev/null
 	MTOOLS_NO_VFAT=1 mformat -f 1440 -v SPRINTALK -i $(DEPLOY_IMG) ::
 	mcopy -i $(DEPLOY_IMG) SPTALK.EXE ::SPTALK.EXE
 	mcopy -i $(DEPLOY_IMG) $(TXT_README) ::SPTALK.TXT
-	mcopy -i $(DEPLOY_IMG) $(TXT_HOWTO)  ::SPTHOWTO.TXT
+	mcopy -i $(DEPLOY_IMG) $(TXT_HOWTO)  ::HOWTO.TXT
+	mcopy -i $(DEPLOY_IMG) $(TXT_HOWTO_RU)  ::HOWTO_RU.TXT
 	@echo "Deployed -> $(DEPLOY_IMG)"
 	@mdir -i $(DEPLOY_IMG) ::
 
-# Release archive: SPTALK.EXE + the two text docs, flat in a zip. `distr`/`dist`
+# Release archive: SPTALK.EXE + the text docs, flat in a zip. `distr`/`dist`
 # are aliases. Requires `zip`.
-distrib dist distr: SPTALK.EXE $(TXT_README) $(TXT_HOWTO)
+distrib dist distr: SPTALK.EXE $(TXT_README) $(TXT_HOWTO) $(TXT_HOWTO_RU)
 	@mkdir -p $(DISTR)
 	rm -f $(DIST_ZIP)
-	zip -j $(DIST_ZIP) SPTALK.EXE $(TXT_README) $(TXT_HOWTO)
+	zip -j $(DIST_ZIP) SPTALK.EXE $(TXT_README) $(TXT_HOWTO) $(TXT_HOWTO_RU)
 	@echo "Packaged -> $(DIST_ZIP)"
 	@unzip -l $(DIST_ZIP)
 
