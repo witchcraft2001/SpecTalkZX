@@ -40,9 +40,12 @@ static u8     ns_done;                   /* auto-identify fired this connection 
 static u16    idle_s;                    /* seconds since last RX (keepalive timer) */
 static u8     ka_pinged;                 /* keepalive PING already sent this idle period */
 static u8     link_up;                   /* link considered established (one-shot teardown) */
+static u16    list_seen;                 /* RPL_LIST lines seen in the current /list */
+static u8     list_suppressed;           /* told the user that the rest is hidden */
 
 #define KA_PING_S    150                 /* idle this long -> send a keepalive PING */
 #define KA_TIMEOUT_S 300                 /* idle this long with no reply -> link is dead */
+#define LIST_SHOW_MAX 40                  /* /list is huge on Libera; don't render all of it */
 
 /* ---- string helpers ------------------------------------------------ */
 static u8 lc(u8 c) { return (c >= 'A' && c <= 'Z') ? (u8)(c + 32) : c; }
@@ -120,6 +123,11 @@ static void o_init(void) { ob = out; }
 static void o_str(const char *s) { while (*s && ob < out + sizeof(out) - 1) *ob++ = *s++; }
 static void o_c(char c) { if (ob < out + sizeof(out) - 1) *ob++ = c; }
 static void o_end(void) { *ob = 0; }
+
+#define TX2(a,b)       net_send_parts((a), (b), "", "", "")
+#define TX3(a,b,c)     net_send_parts((a), (b), (c), "", "")
+#define TX4(a,b,c,d)   net_send_parts((a), (b), (c), (d), "")
+#define TX5(a,b,c,d,e) net_send_parts((a), (b), (c), (d), (e))
 
 /* ---- windows ------------------------------------------------------- */
 static void banner_refresh(void) {
@@ -278,9 +286,9 @@ static void handle_ctcp(const char *usr, const char *target, char *c) {
         o_init(); o_str("* "); o_str(usr); o_c(' '); o_str(c + 7); o_end();
         win_print(route_win(usr, target), out);
     } else if (seq(c, "VERSION")) {
-        net_send("NOTICE "); net_send(usr); net_send(" :\001VERSION " APP_TITLE " (Sprinter)\001\r\n");
+        TX3("NOTICE ", usr, " :\001VERSION " APP_TITLE " (Sprinter)\001\r\n");
     } else if (seq(c, "PING")) {
-        net_send("NOTICE "); net_send(usr); net_send(" :\001PING"); net_send(c + 4); net_send("\001\r\n");
+        TX5("NOTICE ", usr, " :\001PING", c + 4, "\001\r\n");
     }
 }
 
@@ -401,6 +409,24 @@ static void h_numeric(u16 n, const char *txt) {
         win_print(w, out);
     } else if (n == 366 || n == 333) {
         /* end-of-names / topic-set-by: quietly ignore */
+    } else if (n == 321) {                            /* RPL_LISTSTART */
+        list_seen = 0;
+        list_suppressed = 0;
+        win_print(0, "* channel list:");
+    } else if (n == 322) {                            /* RPL_LIST: <me> #chan users :topic */
+        if (list_seen < LIST_SHOW_MAX) {
+            o_init();
+            o_str(arg(1)); o_c(' '); o_str(arg(2)); o_c(' '); o_str(txt);
+            o_end();
+            win_print(0, out);
+        } else if (!list_suppressed) {
+            list_suppressed = 1;
+            win_print(0, "* /list output is large; suppressing the rest");
+            win_print(0, "* use /list <pattern> to narrow the search");
+        }
+        list_seen++;
+    } else if (n == 323) {                            /* RPL_LISTEND */
+        win_print(0, "* end of /list");
     } else if (n == 1) {
         registered = 1;
         win_print(0, txt);
@@ -408,7 +434,7 @@ static void h_numeric(u16 n, const char *txt) {
     } else if (n == 433) {                            /* nick in use -> append '_' */
         u8 l = 0; while (mynick[l]) l++;
         if (l < sizeof(mynick) - 1) { mynick[l] = '_'; mynick[l + 1] = 0; }
-        net_send("NICK "); net_send(mynick); net_send("\r\n");
+        TX3("NICK ", mynick, "\r\n");
         o_init(); o_str("* nick in use, trying "); o_str(mynick); o_end();
         win_print(0, out);
         status_refresh();
@@ -427,7 +453,7 @@ static void h_numeric(u16 n, const char *txt) {
 static void dispatch(char *usr, char *cmd, char *par, char *txt) {
     split_params(par);
     if (seq(cmd, "PING")) {
-        net_send("PONG :"); net_send(*txt ? txt : arg(0)); net_send("\r\n");
+        TX3("PONG :", *txt ? txt : arg(0), "\r\n");
     } else if (seq(cmd, "PONG")) {
         /* reply to our keepalive PING — RX already reset the timer; don't show it */
     } else if (seq(cmd, "PRIVMSG")) {
@@ -450,6 +476,16 @@ static void dispatch(char *usr, char *cmd, char *par, char *txt) {
         h_topic(usr, (char *)arg(0), txt);
     } else if (cmd[0] >= '0' && cmd[0] <= '9') {
         h_numeric(to_u16(cmd), txt);
+    } else if (seq(cmd, "ERROR")) {
+        o_init(); o_str("ERROR ");
+        if (par[0]) { o_str(par); o_c(' '); }
+        o_str(txt);
+        o_end();
+        win_print(0, out);
+        net_close();
+        registered = 0;
+        link_up = 0;
+        status_refresh();
     } else {
         /* unknown command: show the whole line (cmd + params + text), not just
          * params — a bare "par" hid which command it was and rendered confusing
@@ -523,7 +559,7 @@ static void irc_register(void) {
     ns_done = 0;                 /* allow auto-identify once on this connection */
     net_warn = 0;                /* fresh connection: clear any stale link warning */
     idle_s = 0; ka_pinged = 0; link_up = 1;   /* arm the keepalive/timeout watchdog */
-    net_send("NICK "); net_send(mynick); net_send("\r\n");
+    TX3("NICK ", mynick, "\r\n");
     net_send("USER sprintalk 0 * :" APP_TITLE "\r\n");
 }
 
@@ -588,17 +624,17 @@ void irc_list_nicks(void) {
 
 void irc_set_nick(const char *n) {
     s_cpy(mynick, n, sizeof(mynick));
-    if (net_is_connected()) { net_send("NICK "); net_send(mynick); net_send("\r\n"); }
+    if (net_is_connected()) TX3("NICK ", mynick, "\r\n");
     status_refresh();
 }
 
 void irc_join(const char *chan) {
-    net_send("JOIN "); net_send(chan); net_send("\r\n");
+    TX3("JOIN ", chan, "\r\n");
 }
 
 void irc_part(void) {
     if (wcur == 0) return;
-    net_send("PART "); net_send(win[wcur].name); net_send("\r\n");
+    TX3("PART ", win[wcur].name, "\r\n");
     win_close(wcur);
 }
 
@@ -607,7 +643,7 @@ void irc_part(void) {
 void irc_close(void) {
     if (wcur == 0) { term_notif("cannot close the server window"); return; }
     if ((win[wcur].name[0] == '#' || win[wcur].name[0] == '&') && net_is_connected()) {
-        net_send("PART "); net_send(win[wcur].name); net_send("\r\n");
+        TX3("PART ", win[wcur].name, "\r\n");
     }
     win_close(wcur);
 }
@@ -617,7 +653,7 @@ void irc_say(const char *text) {
     {
         const char *sendtext = text;
         if (enc_on) { cp866_to_utf8(text, sendbuf, sizeof(sendbuf)); sendtext = sendbuf; }
-        net_send("PRIVMSG "); net_send(win[wcur].name); net_send(" :"); net_send(sendtext); net_send("\r\n");
+        TX5("PRIVMSG ", win[wcur].name, " :", sendtext, "\r\n");
     }
     o_init(); o_c('<'); o_str(mynick); o_str("> "); o_str(text); o_end();   /* echo as typed (CP866) */
     win_print((i8)wcur, out);
@@ -632,7 +668,7 @@ void irc_identify(const char *pass) {
     if (!pass || !pass[0]) pass = nspass;
     if (!pass[0]) { term_notif("no password (use /pass <password> first)"); return; }
     if (!net_is_connected()) { term_notif("not connected"); return; }
-    net_send("PRIVMSG NickServ :IDENTIFY "); net_send(pass); net_send("\r\n");
+    TX3("PRIVMSG NickServ :IDENTIFY ", pass, "\r\n");
     ns_done = 1;
     win_print(0, "* identifying with NickServ...");
 }
@@ -643,8 +679,7 @@ void irc_me(const char *text) {
     {
         const char *sendtext = text;
         if (enc_on) { cp866_to_utf8(text, sendbuf, sizeof(sendbuf)); sendtext = sendbuf; }
-        net_send("PRIVMSG "); net_send(win[wcur].name); net_send(" :\001ACTION ");
-        net_send(sendtext); net_send("\001\r\n");
+        TX5("PRIVMSG ", win[wcur].name, " :\001ACTION ", sendtext, "\001\r\n");
     }
     o_init(); o_str("* "); o_str(mynick); o_c(' '); o_str(text); o_end();   /* local echo (CP866) */
     win_print((i8)wcur, out);
@@ -672,7 +707,7 @@ void irc_msg(const char *target, const char *text) {
     {
         const char *sendtext = text;
         if (enc_on) { cp866_to_utf8(text, sendbuf, sizeof(sendbuf)); sendtext = sendbuf; }
-        net_send("PRIVMSG "); net_send(target); net_send(" :"); net_send(sendtext); net_send("\r\n");
+        TX5("PRIVMSG ", target, " :", sendtext, "\r\n");
     }
     if (target[0] == '#' || target[0] == '&') {
         w = win_find(target);
@@ -714,18 +749,17 @@ void irc_ignore(const char *nick) {
 }
 
 void irc_away(const char *msg) {
-    if (msg[0]) { net_send("AWAY :"); net_send(msg); net_send("\r\n"); irc_local("* you are now away"); }
+    if (msg[0]) { TX3("AWAY :", msg, "\r\n"); irc_local("* you are now away"); }
     else        { net_send("AWAY\r\n"); irc_local("* you are back"); }
 }
 
-void irc_raw(const char *line) { net_send(line); net_send("\r\n"); }
+void irc_raw(const char *line) { TX2(line, "\r\n"); }
 
 /* forward an unrecognized "/cmd args" to the server as a raw IRC command */
 void irc_send_cmd(const char *cmd, const char *arg) {
     if (!net_is_connected()) { term_notif("not connected"); return; }
-    net_send(cmd);
-    if (arg[0]) { net_send(" "); net_send(arg); }
-    net_send("\r\n");
+    if (arg[0]) TX4(cmd, " ", arg, "\r\n");
+    else TX2(cmd, "\r\n");
 }
 
 void irc_quit(void) {

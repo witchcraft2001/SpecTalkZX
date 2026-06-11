@@ -18,6 +18,7 @@
 i8   net_init(void);                                  /* probe+init UART, ESP to cmd mode; NET_NO_HW if absent */
 i8   net_connect(const char *host, const char *port); /* open TCP, enter transparent mode */
 void net_send(const char *s);                         /* send raw bytes (NUL-terminated) */
+void net_send_parts(const char *a, const char *b, const char *c, const char *d, const char *e);
 u16  net_poll(u8 *buf, u16 max);                       /* non-blocking: bytes available now */
 void net_rx_pause(void);           /* hold off the link's RX (RTS low) during slow work */
 void net_rx_resume(void);          /* re-enable RX before the next net_poll */

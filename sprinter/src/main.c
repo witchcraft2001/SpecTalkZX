@@ -136,7 +136,7 @@ static void gen_nick(char *o) {
 /* ---- Tab autocompletion (commands after '/', else nicks) ----------- */
 static const char *const CMD_TBL[] = {
     "server", "nick", "join", "query", "msg", "me", "id", "pass", "close",
-    "part", "quit", "win", "raw", "ignore", "away", "timestamp", "encoding",
+    "part", "quit", "win", "raw", "list", "ignore", "away", "timestamp", "encoding",
     "help", 0
 };
 static u8   comp_active;          /* mid completion cycle */
@@ -298,6 +298,13 @@ static void do_command(char *line) {
         irc_list_nicks();
     } else if (starts(cmd, "raw")) {
         irc_raw(arg);
+    } else if (starts(cmd, "list")) {
+        if (!arg[0]) {
+            term_notif("use /list <pattern> (plain /list is too large)");
+            irc_local("* plain /list is too large; try /list *sprinter*");
+        } else {
+            irc_send_cmd(cmd, arg);
+        }
     } else if (starts(cmd, "ignore")) {
         irc_ignore(arg);
     } else if (starts(cmd, "away")) {
@@ -320,6 +327,7 @@ static void do_command(char *line) {
         irc_local("  /close                 - close current window (channel or query)");
         irc_local("  /quit                  - disconnect");
         irc_local("  /raw <text>            - send a raw IRC line");
+        irc_local("  /list <pattern>        - list matching channels");
         irc_local("  /ignore <nick>         - toggle ignoring a nick");
         irc_local("  /away [message]        - set/clear away");
         irc_local("  /timestamp (/ts)       - toggle message timestamps");

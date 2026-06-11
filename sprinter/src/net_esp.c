@@ -58,8 +58,13 @@ static u8 streq(const char *a, const char *b) {
     return *a == *b;
 }
 
-/* Discard whatever RX is pending right now (stale AT residue before a command). */
-static void flush_rx(void) { uart_drain(scratch, sizeof(scratch)); }
+/* Discard whatever RX is pending right now (stale AT residue before a command).
+ * Keep this strictly UART-only: /server runs inside the input path, and waiting
+ * on video/DSS primitives here proved unsafe on some real machines. */
+static void flush_rx(void) {
+    u8 guard = 16;
+    while (guard-- && uart_drain(scratch, sizeof(scratch))) ;
+}
 
 /* Wait for an AT result line, reading byte-by-byte and matching whole CRLF lines.
  * Unlike quiet() (fixed-time blind discard) this keys off the actual ESP reply,
@@ -96,11 +101,40 @@ static u8 esp_expect(u8 secs) {
     return ESP_TIMEOUT;
 }
 
+/* CIPSTART is noisy on some ESP firmwares: stale ERROR/FAIL from earlier cleanup
+ * can precede the real CONNECT/OK. Treat CONNECT or OK as success, ignore early
+ * errors, and only fail if no success line arrives before timeout. */
+static u8 esp_expect_connect(u8 secs) {
+    dss_time_t t;
+    u8 last, k = 0, b, rlen = 0;
+    char rline[20];
+    dss_gettime(&t); last = t.second;
+    while (k < secs) {
+        if (uart_drain(&b, 1) == 1) {
+            if (b == '\r' || b == '\n') {
+                rline[rlen] = 0;
+                if (rlen) {
+                    if (streq(rline, "CONNECT") || streq(rline, "OK")
+                        || streq(rline, "ALREADY CONNECTED"))
+                        return ESP_OK;
+                }
+                rlen = 0;
+            } else if (rlen < sizeof(rline) - 1) {
+                rline[rlen++] = (char)b;
+            }
+        } else {
+            dss_gettime(&t);
+            if (t.second != last) { last = t.second; k++; term_clock(); }
+        }
+    }
+    return ESP_TIMEOUT;
+}
+
 /* back to command mode + drop any leftover socket */
 static void esp_reset(void) {
-    quiet(1);                 /* silence before escape (guard ~1s, plenty) */
+    quiet(2);                 /* silence before escape (guard for "+++") */
     uart_tx_str("+++");
-    quiet(1);                 /* silence after escape */
+    quiet(2);                 /* silence after escape */
     uart_tx_str("\r\n");      /* flush any partial command-mode buffer */
     at("ATE0", 1);
     at("AT+CIPCLOSE", 1);
@@ -111,9 +145,10 @@ static void esp_reset(void) {
  * We put it in CIPMODE=1; if we don't undo that, their AT commands fail with
  * "ESP communication error #1". Echo stays off (ATE0) — the kit uses ATE0 too. */
 static void esp_restore(void) {
-    quiet(1);
+    uart_rx_resume();
+    quiet(2);
     uart_tx_str("+++");       /* escape transparent mode if still in it */
-    quiet(1);
+    quiet(2);
     uart_tx_str("\r\n");
     at("ATE0", 1);
     at("AT+CIPCLOSE", 1);     /* close any socket (harmless if none) */
@@ -178,6 +213,7 @@ static void watch_closed(const u8 *buf, u16 n) {
 }
 
 i8 net_connect(const char *host, const char *port) {
+    uart_rx_resume();          /* main loop keeps RTS low while handling input */
     esp_reset();
     cm = 0;
     ever_used = 1;            /* from here the ESP needs CIPMODE restored on exit */
@@ -193,13 +229,11 @@ i8 net_connect(const char *host, const char *port) {
     uart_tx_str("AT+CIPMODE=1\r\n"); esp_expect(2);
 
     flush_rx();
-    uart_tx_str("AT+CIPSTART=\"TCP\",\"");
-    uart_tx_str(host);
-    uart_tx_str("\",");
-    uart_tx_str(port);
-    uart_tx_str("\r\n");
-    if (esp_expect(15) != ESP_OK) {  /* DNS resolve + TCP connect; CONNECT then OK */
+    uart_tx_parts("AT+CIPSTART=\"TCP\",\"", host, "\",", port, "\r\n");
+    if (esp_expect_connect(15) != ESP_OK) {  /* DNS resolve + TCP connect; CONNECT then OK */
         connected = 0;
+        esp_reset();
+        uart_rx_pause();
         return NET_NO_LINK;          /* DNS/connect failed or timed out */
     }
 
@@ -211,14 +245,21 @@ i8 net_connect(const char *host, const char *port) {
     uart_tx_str("AT+CIPSEND\r\n");
     if (!wait_prompt(3)) {
         connected = 0;
+        esp_reset();
+        uart_rx_pause();
         return NET_NO_LINK;          /* never got the data prompt */
     }
     connected = 1;
+    uart_rx_pause();
     return NET_OK;
 }
 
 void net_send(const char *s) {
     uart_tx_str(s);
+}
+
+void net_send_parts(const char *a, const char *b, const char *c, const char *d, const char *e) {
+    uart_tx_parts(a, b, c, d, e);
 }
 
 u16 net_poll(u8 *buf, u16 max) {

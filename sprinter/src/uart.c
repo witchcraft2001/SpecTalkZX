@@ -81,15 +81,29 @@ void uart_init(u8 divisor) {
     isa_close();
 }
 
-void uart_tx_str(const char *s) {
-    isa_open();
-    while (*s) {
+static u8 tx_one(const char *s) {
+    while (s && *s) {
         u16 guard = 0;
         while (!(*U_LSR & LSR_THRE)) {
-            if (++guard >= TX_GUARD) { uart_tx_stall = 1; isa_close(); return; }  /* abort, don't hang */
+            if (++guard >= TX_GUARD) { uart_tx_stall = 1; return 0; }  /* abort, don't hang */
         }
         *U_THR = (u8)*s++;
     }
+    return 1;
+}
+
+void uart_tx_str(const char *s) {
+    isa_open();
+    tx_one(s);
+    isa_close();
+}
+
+/* Send a complete logical line in one UART burst. This avoids splitting IRC
+ * commands across several net_send() calls and reports one stall for the whole
+ * line instead of letting later fragments run as separate sends. */
+void uart_tx_parts(const char *a, const char *b, const char *c, const char *d, const char *e) {
+    isa_open();
+    if (tx_one(a) && tx_one(b) && tx_one(c) && tx_one(d)) tx_one(e);
     isa_close();
 }
 
