@@ -9,8 +9,9 @@ README/HOWTO so the result reads cleanly in a DOS/Sprinter text viewer.
   * [text](url)  -> text (url)
   * bullet "- " / "* "  -> "  - "
   * fenced ``` code blocks -> kept verbatim (fence lines dropped)
-Output uses CRLF line endings. By default it writes ASCII only; pass `cp866`
-as the optional third argument to keep Cyrillic for Sprinter/DOS text files.
+Output uses CRLF line endings. By default it writes ASCII only (non-ASCII -> '?');
+pass `cp866` as the optional third argument to keep Cyrillic and CP866
+block-drawing characters (e.g. the SprinTalk logo) for Sprinter/DOS viewers.
 """
 import sys
 import re

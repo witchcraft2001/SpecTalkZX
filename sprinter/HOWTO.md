@@ -178,4 +178,7 @@ sends `QUIT`, closes the link cleanly, and returns to DSS.
   `SPTALK.CFG` in the current directory; delete it to reset.
 
 ---
-SprinTalk 0.1 — Dmitry Mikhalchenkov (SprinterTeam). Based on SpecTalk ZX.
+Based on SpecTalk ZX.
+
+Dmitry Mikhalchenkov (SprinterTeam).
+FidoNet: 2:5030/1997.10

@@ -126,9 +126,10 @@ NETDIAG.EXE:  $(SDK)/build/crt0_page2.rel $(NETDIAG_OBJS)
 NETIRC.EXE:   $(SDK)/build/crt0_page2.rel $(NETIRC_OBJS)
 
 # Markdown -> plain text (CRLF, DOS-friendly) for the floppy.
+# SPTALK.TXT / HOWTO_RU.TXT: CP866 (block-drawing logo + Cyrillic). HOWTO.TXT: ASCII.
 $(TXT_README): $(DOC_README) tools/md2txt.py
 	@mkdir -p $(@D)
-	$(PYTHON) tools/md2txt.py $(DOC_README) $@
+	$(PYTHON) tools/md2txt.py $(DOC_README) $@ cp866
 $(TXT_HOWTO): $(DOC_HOWTO) tools/md2txt.py
 	@mkdir -p $(@D)
 	$(PYTHON) tools/md2txt.py $(DOC_HOWTO) $@

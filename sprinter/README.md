@@ -1,3 +1,13 @@
+```
+  ▄▄▄▄▄                ▄▄▄▄▄▄▄     ▄▄        
+ ██▀▀▀▀█▄             █▀▀██▀▀▀▀     ██       
+ ▀██▄  ▄▀       ▀▀ ▄     ██         ██ ▄▄    
+   ▀██▄▄  ████▄ ██ ████▄ ██   ▄▀▀█▄ ██ ██ ▄█▀
+ ▄   ▀██▄ ██ ██ ██ ██ ██ ██   ▄█▀██ ██ ████  
+ ▀██████▀▄████▀▄██▄██ ▀█ ▀██▄▄▀█▄██▄██▄██ ▀█▄
+          ██                                 
+          ▀                                  
+```
 # SprinTalk 0.1
 
 An IRC client for the **Sprinter** computer running **DSS**, in native 80x32
@@ -6,23 +16,14 @@ brought up by the SprinterWiFi kit, and supports multiple channels and private
 chats, scrollback history, Cyrillic (CP866) with on-the-fly UTF-8 recoding, and
 NickServ identification.
 
-- **Author:** Dmitry Mikhalchenkov (SprinterTeam)
+- **Author:** Dmitry Mikhalchenkov, SprinterTeam. 2:5030/1997.10
 - **Based on:** the SpecTalk ZX sources (ZX Spectrum IRC client), ported and
   largely rewritten for the Sprinter / DSS platform.
 - **Version:** 0.1
 
-## Network backend (ESP / RTL)
-
-SprinTalk is built for a specific network card; the build tag tells you which:
-
-- **ESP** — SprinterWiFi / ESP card over the serial (UART) port. *This is the
-  current release.* The title bar shows `SprinTalk 0.1 ESP`.
-- **RTL** — RTL8019 (NE2000) ISA Ethernet card. *Planned* — a separate `RTL`
-  build will use the same interface and commands.
-
 ## What you need
 
-- A Sprinter with DSS and the SprinterWiFi (ESP) card set up.
+- A Sprinter with DSS and the SprinterWiFi kit set up.
 - `SPTALK.EXE` from the delivery package, copied onto your Sprinter (disk, CF/SD
   card, hard drive — wherever you run programs from). `SPTALK.TXT` (this file) and
   `HOWTO.TXT` / `HOWTO_RU.TXT` (the how-to) are documentation.
