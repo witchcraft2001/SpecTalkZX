@@ -525,11 +525,22 @@ static void parse_line(char *line) {
 /* ---- feed ---------------------------------------------------------- */
 static char asmbuf[512];
 static u16  asmpos;
+static u8   asm_discard;  /* transport lost bytes: ignore the damaged line through its LF */
+
+void irc_resync(void) {
+    asmpos = 0;
+    asm_discard = 1;
+}
+
 void irc_feed(const u8 *data, u16 n) {
     u16 i;
     if (n) { idle_s = 0; ka_pinged = 0; }    /* RX activity resets the keepalive timer */
     for (i = 0; i < n; i++) {
         u8 c = data[i];
+        if (asm_discard) {
+            if (c == '\n') { asm_discard = 0; asmpos = 0; }
+            continue;
+        }
         if (c == '\n') {
             asmbuf[asmpos] = 0;
             if (enc_on) utf8_to_cp866(asmbuf);   /* incoming UTF-8 -> CP866 */
@@ -550,7 +561,7 @@ void irc_init(const char *nick) {
     s_cpy(win[0].name, "(server)", WIN_NAME);
     win[0].flags = F_ACTIVE | F_SERVER;
     hist_open(0);
-    wcur = 0; registered = 0; asmpos = 0;
+    wcur = 0; registered = 0; asmpos = 0; asm_discard = 0;
     banner_refresh();
     status_refresh();
 }

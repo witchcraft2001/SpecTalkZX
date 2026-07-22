@@ -436,19 +436,13 @@ void main(void) {
     redraw();
 
     for (;;) {
-        /* RX flow control (mirrors the SprinterWiFi ftp/wget driver): raise RTS,
-         * drain the ESP's burst, then drop RTS so the ESP holds its TX for the
-         * whole slow render below. Without this the render outran the FIFO and
-         * lost messages, desyncing the IRC state (broken /join). See uart.c. */
-        net_rx_resume();
         n = net_poll(rxb, sizeof(rxb));   /* drain UART first, before slower work */
-        net_rx_pause();
-        if (n) irc_feed(rxb, n);
-
-        if (net_overrun()) {              /* RX overran anyway -> bytes lost, state may be off */
+        if (net_overrun()) {              /* RX bytes were lost: never parse the damaged IRC line */
             net_clear_overrun();
-            term_notif("WARNING: link overrun, some messages may be lost");
+            irc_resync();
+            term_notif("WARNING: link overrun; IRC stream resynchronized");
         }
+        if (n) irc_feed(rxb, n);
 
         if (was_conn && !irc_connected()) {   /* link dropped (ESP reported CLOSED) */
             irc_on_disconnect();

@@ -11,7 +11,7 @@
 
 #define APP_NAME    "SprinTalk"
 #define APP_VER     "0.1"
-#define APP_AUTHOR  "Dmitry Mikhalchenkov (SprinterTeam)"
+#define APP_AUTHOR  "Dmitry Mikhalchenkov, SprinterTeam. FidoNet:2:5030/1997.10"
 
 /* Compiler-stamped build date/time. Only fresh in the translation unit being
  * compiled, so the Makefile force-rebuilds main.c (which prints it) every build. */

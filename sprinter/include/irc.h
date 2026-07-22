@@ -18,6 +18,7 @@ void irc_init(const char *nick);
 
 /* transport-facing */
 void irc_feed(const u8 *data, u16 n);     /* assemble lines from the byte stream, dispatch */
+void irc_resync(void);                     /* discard bytes through the next LF after transport loss */
 i8   irc_connect(const char *host, const char *port);  /* net_connect + register */
 u8   irc_connected(void);
 void irc_on_disconnect(void);             /* main loop calls this when the link drops */

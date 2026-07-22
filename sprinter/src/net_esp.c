@@ -145,7 +145,6 @@ static void esp_reset(void) {
  * We put it in CIPMODE=1; if we don't undo that, their AT commands fail with
  * "ESP communication error #1". Echo stays off (ATE0) — the kit uses ATE0 too. */
 static void esp_restore(void) {
-    uart_rx_resume();
     quiet(2);
     uart_tx_str("+++");       /* escape transparent mode if still in it */
     quiet(2);
@@ -213,7 +212,6 @@ static void watch_closed(const u8 *buf, u16 n) {
 }
 
 i8 net_connect(const char *host, const char *port) {
-    uart_rx_resume();          /* main loop keeps RTS low while handling input */
     esp_reset();
     cm = 0;
     ever_used = 1;            /* from here the ESP needs CIPMODE restored on exit */
@@ -233,7 +231,6 @@ i8 net_connect(const char *host, const char *port) {
     if (esp_expect_connect(15) != ESP_OK) {  /* DNS resolve + TCP connect; CONNECT then OK */
         connected = 0;
         esp_reset();
-        uart_rx_pause();
         return NET_NO_LINK;          /* DNS/connect failed or timed out */
     }
 
@@ -246,11 +243,9 @@ i8 net_connect(const char *host, const char *port) {
     if (!wait_prompt(3)) {
         connected = 0;
         esp_reset();
-        uart_rx_pause();
         return NET_NO_LINK;          /* never got the data prompt */
     }
     connected = 1;
-    uart_rx_pause();
     return NET_OK;
 }
 
@@ -267,11 +262,6 @@ u16 net_poll(u8 *buf, u16 max) {
     if (connected && n) watch_closed(buf, n);
     return n;
 }
-
-/* Manual RX flow control: drop/raise RTS around the slow render so the ESP holds
- * its TX for the whole render instead of overrunning the FIFO (see uart.c). */
-void net_rx_pause(void)  { uart_rx_pause(); }
-void net_rx_resume(void) { uart_rx_resume(); }
 
 /* Close the link. Restores the ESP whenever we ever entered transparent mode —
  * even if the socket is already gone (timeout/CLOSED), so CIPMODE is always put

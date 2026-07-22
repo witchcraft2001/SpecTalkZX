@@ -61,17 +61,12 @@ void uart_init(u8 divisor) {
     uart_tx_stall = 0;
     uart_rx_err = 0;
     isa_open();
-    /* FIFO on + RX trigger level 8 (FCR bits7:6 = 10), matching the SprinterWiFi
-     * ftp/wget driver. The FIFO trigger alone is NOT relied on to survive a slow
-     * render: the caller now drops RTS manually (uart_rx_pause) for the whole
-     * render and raises it again (uart_rx_resume) right before draining, so the
-     * ESP (flow=3, set by NETUP) is held off for the entire slow path — not just
-     * the few FIFO byte-times of headroom. With the manual pause in place the
-     * trigger only governs burst size between drains, so TR8 (faster bursts) is
-     * safe where it overran before (that earlier overrun was the render outrunning
-     * the FIFO with NO manual pause). Pausing keeps AFE enabled and only clears
-     * the RTS bit — the proven recipe from esplib.asm UART_RX_PAUSE/RESUME. */
-    *U_FCR = 0x87;          /* FIFO enable + flush RX/TX + RX trigger 8 */
+    /* Let the UART's automatic flow control manage RTS.  On the real ESP card,
+     * forcing RTS low in software can wedge RX; with AFE the UART instead lowers
+     * it as soon as its FIFO reaches this threshold.  Trigger 4 leaves 12 bytes
+     * of hardware headroom while rendering, unlike trigger 8 which has already
+     * caused intermittent overruns and damaged IRC lines. */
+    *U_FCR = 0x47;          /* FIFO enable + flush RX/TX + RX trigger 4 */
     *U_IER = 0x00;          /* no interrupts */
     *U_LCR = 0x83;          /* DLAB | 8N1 */
     *U_DLL = divisor;
@@ -122,21 +117,4 @@ u16 uart_drain(u8 *buf, u16 max) {
     }
     isa_close();
     return n;
-}
-
-/* Manual RX flow control (mirrors esplib.asm UART_RX_PAUSE/RESUME). Drop RTS
- * before any slow, non-draining work (rendering): with AFE still on, clearing
- * the RTS bit deasserts the line and the ESP pauses its TX. Raise RTS again just
- * before draining. This gives the ESP the whole slow path to stop, instead of
- * only the FIFO headroom — the fix for lost messages during channel renders. */
-void uart_rx_pause(void) {
-    isa_open();
-    *U_MCR = MCR_AFE;            /* RTS low, auto-flow still enabled */
-    isa_close();
-}
-
-void uart_rx_resume(void) {
-    isa_open();
-    *U_MCR = MCR_AFE | MCR_RTS;  /* RTS high: ESP may transmit again */
-    isa_close();
 }
