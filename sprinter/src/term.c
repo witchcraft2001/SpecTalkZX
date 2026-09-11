@@ -21,10 +21,18 @@ static void clear_row(u8 y, u8 attr) {
     clear_rect(1, y, SCR_W, 1, attr);
 }
 
+/* One row's worth of text, assembled here and pushed with a single dss_puts.
+ * Every DSS call costs a trip through the win0 RST trampoline, so a row drawn
+ * character by character is eighty syscalls; the input row is redrawn on every
+ * keystroke, which is where that showed up as typing lag. */
+static char rowbuf[SCR_W + 1];
+
 static void put_clip(u8 x, u8 y, const char *s) {
-    u8 room = (u8)(SCR_W - (x - 1));
+    u8 room = (u8)(SCR_W - (x - 1)), i = 0;
+    while (*s && room) { rowbuf[i++] = *s++; room--; }
+    rowbuf[i] = 0;
     dss_gotoxy(x, y);
-    while (*s && room) { dss_putchar((u8)*s++); room--; }
+    dss_puts(rowbuf);
 }
 
 static void put2(u8 v) {
@@ -51,9 +59,20 @@ void term_banner(const char *title) {
 void term_clock(void) {
     static u8 last = 0xFF;
     dss_time_t t;
+    u8 sec, prev;
     dss_gettime(&t);
-    if (t.second == last) return;          /* redraw only when the second changes */
-    last = t.second;
+    /* Store BEFORE the comparison. SDCC 4.5 compiles the natural
+     *     if (t.second == last) return; last = t.second;
+     * into `sub a,(hl) / jr Z / ld (last),a` -- it believes A still holds
+     * t.second after the SUB, so `last` ends up holding the DIFFERENCE and
+     * never matches again. The clock then repainted on every main-loop pass:
+     * a gotoxy, eight dss_putchar and six software divisions per pass, which
+     * was most of the client's idle CPU. Writing first keeps the store on a
+     * value that is provably live. See PLATFORM.md. */
+    sec = t.second;
+    prev = last;
+    last = sec;
+    if (sec == prev) return;               /* redraw only when the second changes */
     dss_gotoxy(SCR_W - 8, BANNER_ROW);
     put2(t.hour); dss_putchar(':');
     put2(t.minute); dss_putchar(':');
@@ -128,9 +147,12 @@ void term_input(const char *buf, u16 len, u16 cur) {
     u8 i, col, ch, vw = SCR_W - 3;     /* visible chars after "> " */
     u16 off = (cur >= vw) ? (u16)(cur - vw + 1) : 0;
     clear_row(INPUT_ROW, ATTR_NORMAL);
+    rowbuf[0] = off ? '<' : '>';
+    rowbuf[1] = ' ';
+    for (i = 0; i < vw && (off + i) < len; i++) rowbuf[2 + i] = buf[off + i];
+    rowbuf[2 + i] = 0;
     dss_gotoxy(1, INPUT_ROW);
-    dss_putchar(off ? '<' : '>'); dss_putchar(' ');
-    for (i = 0; i < vw && (off + i) < len; i++) dss_putchar((u8)buf[off + i]);
+    dss_puts(rowbuf);
     col = (u8)(3 + (cur - off));
     if (col > SCR_W) col = SCR_W;
     ch = (cur < len) ? (u8)buf[cur] : ' ';

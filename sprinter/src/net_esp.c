@@ -274,7 +274,12 @@ void net_close(void) {
 u8 net_is_connected(void) { return connected; }
 
 u8 net_stalled(void) { return uart_stalled(); }
+/* The ESP path has no numeric backend status to report: its failures are
+   already spelled out in the AT-command handling. */
+u8 net_last_status(void) { return 0; }
 void net_clear_stall(void) { uart_clear_stall(); }
 
 u8 net_overrun(void) { return uart_overrun(); }
 void net_clear_overrun(void) { uart_clear_overrun(); }
+
+const char *net_last_detail(void) { return ""; }

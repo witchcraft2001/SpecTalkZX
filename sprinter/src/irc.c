@@ -151,13 +151,22 @@ static void status_refresh(void) {
         o_c(' ');
     }
     o_c(']');
-    if (net_warn) o_str("  *** ESP NOT RESPONDING ***");
+    if (net_warn) o_str("  *** LINK NOT RESPONDING ***");   /* transport-neutral: ESP or a UNET DLL */
     else if (registered) o_str("  online");
     o_end();
     term_status(out);
 }
 
-void irc_net_warn(u8 on) { if (net_warn != on) { net_warn = on; status_refresh(); } }
+/* Write before comparing: the same SDCC 4.5 miscompile as term_clock's second
+   counter (see PLATFORM.md). The natural form stored the DIFFERENCE into
+   net_warn, so every call looked like a change and repainted the whole
+   80-column status row -- and main.c calls this on every pass that receives
+   data, which is why the client only dragged while a server was connected. */
+void irc_net_warn(u8 on) {
+    u8 prev = net_warn;
+    net_warn = on;
+    if (prev != on) status_refresh();
+}
 
 static i8 win_find(const char *name) {
     u8 i;

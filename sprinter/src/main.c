@@ -15,6 +15,9 @@
 #include "net.h"
 #include "irc.h"
 #include "cfg.h"
+#ifdef NET_BACKEND_UNET
+#include "unetld.h"      /* bring-up diagnostics: which stage failed, and why */
+#endif
 
 #define K_ESC   0x1B
 #define K_ENTER 0x0D
@@ -36,6 +39,66 @@
 /* ---- small string helpers ------------------------------------------ */
 static u8 starts(const char *s, const char *p) { while (*p) { if (*s != *p) return 0; s++; p++; } return 1; }
 static void s_cpy(char *d, const char *s, u8 max) { u8 i = 0; while (s[i] && i < (u8)(max - 1)) { d[i] = s[i]; i++; } d[i] = 0; }
+
+#ifdef NET_BACKEND_UNET
+/* net_init() collapses six distinct UNETLD failures into NET_NO_HW/NET_NO_LINK,
+ * which on their own read as "no card" and send the user looking at hardware
+ * when the real cause is usually an unset NET or a missing DLL on the disk.
+ * unetld keeps the precise code, so print that instead. */
+static const char *unet_why(u8 e)
+{
+    switch (e) {
+    case UNETLD_E_NOENV:    return "env NET is empty - run the card's setup tool first";
+    case UNETLD_E_BADVALUE: return "env NET is not a 3-4 char A-Z0-9 tag";
+    case UNETLD_E_LOAD:     return "DLL not found next to SPTALK.EXE (or unreadable)";
+    case UNETLD_E_NAME:     return "DLL's own name does not match env NET";
+    case UNETLD_E_CALL:     return "DLL rejected the GETCAPS call";
+    case UNETLD_E_ABI:      return "DLL ABI version not supported";
+    case UNETLD_E_STATUS:   return "DLL reports the link is down (STATUS)";
+    case UNETLD_E_NETINIT:  return "NETINIT failed - card present but not ready";
+    /* UNETLD_E_NONE: nothing set the error, so the only failure left is
+     * net_init()'s own capability gate (unetld_require(UNET_CAP_TCP)). */
+    default:                return "DLL does not offer TCP";
+    }
+}
+#endif
+
+#ifdef NET_BACKEND_UNET
+/* UNETAPI.md's NERR_* table. Worth the bytes: every transport failure in this
+ * build arrives as one of these numbers, and without a name the UI can only
+ * say "network not responding", which describes six unrelated causes. */
+static const char *nerr_name(u8 e)
+{
+    switch (e) {
+    case 1:  return "no hardware";
+    case 2:  return "network not configured";
+    case 3:  return "DNS lookup failed";
+    case 4:  return "connect refused or unreachable";
+    case 5:  return "no ACK from peer";
+    case 6:  return "receive timeout";
+    case 7:  return "closed by peer";
+    case 8:  return "cancelled";
+    case 9:  return "bad parameter";
+    case 10: return "not supported";
+    case 11: return "wrong state (link down?)";
+    case 12: return "timeout";
+    case 13: return "busy";
+    case 14: return "protocol error";
+    default: return "no status";
+    }
+}
+
+/* term_notif(a + b) -- the notification row is the only place a backend status
+ * fits without spending a chat line on it. */
+static void notif2(const char *a, const char *b)
+{
+    char m[80], *o = m;
+    while (*a && o < m + 78) *o++ = *a++;
+    while (*b && o < m + 78) *o++ = *b++;
+    *o = 0;
+    term_notif(m);
+}
+#endif
 
 static settings_t S;     /* persisted last server/port/nick */
 
@@ -251,6 +314,18 @@ static char *next_arg(char *s) {
     return s;
 }
 
+#ifdef NET_BACKEND_UNET
+/* Put the backend's own LASTERR line in the scrollback under a failure. It is
+   the DLL's account, not ours: which stage failed, its internal codes, and --
+   for UNETRTL -- the NIC's captured transmit status, which is what separates
+   "the peer never answered" from "the card never sent it". Silent when the
+   backend has nothing to say. */
+static void net_detail_line(void) {
+    const char *d = net_last_detail();
+    if (*d) irc_local(d);
+}
+#endif
+
 static void do_command(char *line) {
     char *cmd = line + 1;
     char *arg = next_arg(cmd);
@@ -264,7 +339,12 @@ static void do_command(char *line) {
             cfg_add_server(&S, host, port); /* remember it (recent-server list) */
             save_settings();
         } else {
+#ifdef NET_BACKEND_UNET
+            notif2("connect failed: ", nerr_name(net_last_status()));
+            net_detail_line();
+#else
             term_notif("connect failed - check link/server, try again");
+#endif
         }
     } else if (starts(cmd, "nick")) {
         if (arg[0]) { irc_set_nick(arg); save_settings(); }
@@ -356,6 +436,8 @@ void main(void) {
     u16 i, n;
     u8 quit_pending = 0;
     u8 was_conn = 0;
+    u8 link_bad = 0;   /* sticky: the last send gave up. net_stalled() is cleared
+                          every iteration, so it cannot answer this at exit. */
 
     term_init();
     term_notif("Starting up...");                         /* immediate feedback while loading */
@@ -371,6 +453,60 @@ void main(void) {
     eh_init();
     for (i = 0; i < IN_MAX; i++) inbuf[i] = 0;
 
+#ifdef NET_BACKEND_UNET
+    term_notif("Loading the network DLL, please wait...");
+    {
+        i8 nr = net_init();
+        char m[132], *o = m;            /* holds "tried: " + u_dllpath (112) */
+        const char *p;
+        const char *tag  = unetld_net_tag();
+        const char *name = unetld_dll_name();
+
+        /* Always say which DLL was picked from env NET: it is the one line that
+         * turns "networking unavailable" into something actionable. */
+        p = "UNET: NET="; while (*p) *o++ = *p++;
+        if (*tag) { while (*tag) *o++ = *tag++; } else { *o++ = '?'; }
+        p = " -> "; while (*p) *o++ = *p++;
+        if (*name) { while (*name) *o++ = *name++; } else { p = "(unresolved)"; while (*p) *o++ = *p++; }
+        *o = 0;
+        irc_local(m);
+
+        if (nr != NET_OK) {
+            o = m;
+            p = "Load failed: "; while (*p) *o++ = *p++;
+            p = unet_why(unetld_error()); while (*p) *o++ = *p++;
+            *o = 0;
+            irc_local(m);
+            p = unetld_dll_path();
+            if (*p) {                   /* the exact name that failed to open */
+                o = m;
+                { const char *q = "tried: "; while (*q) *o++ = *q++; }
+                while (*p) *o++ = *p++;
+                *o = 0;
+                irc_local(m);
+            }
+            irc_local("UI works, networking unavailable.");
+        } else {
+            const char *b = net_cfg_baud();
+            o = m;
+            p = "Network ready via "; while (*p) *o++ = *p++;
+            p = unetld_dll_name(); while (*p) *o++ = *p++;
+            /* The DLL's own 15-byte name field ("UNETRTL v0.3.1"), read out of
+               the loaded image rather than the file name. A backend bug fixed
+               in a point release looks exactly like a bug here, so the revision
+               that is actually running belongs in the log. */
+            { const char *v = unet_dll_name();
+              if (*v) { *o++ = ' '; *o++ = '('; while (*v) *o++ = *v++; *o++ = ')'; } }
+            if (*b) {
+                p = ", baud="; while (*p) *o++ = *p++;
+                while (*b) *o++ = *b++;
+            }
+            *o = 0;
+            irc_local(m);
+            irc_local("/help for commands.");
+        }
+    }
+#else
     term_notif("Initializing network (ESP), please wait...");
     {
         i8 nr = net_init();
@@ -404,6 +540,7 @@ void main(void) {
         irc_local("/help for commands.");
         }
     }
+#endif
 
     /* Seed the input recall: channels first, then servers, so the most recent
      * /server is what Up offers first (you connect before you join). */
@@ -451,62 +588,89 @@ void main(void) {
         was_conn = irc_connected();
         irc_keepalive();                      /* PING when idle; drop a dead link after a timeout */
 
-        if (net_stalled()) {                  /* a send couldn't drain: ESP wedged */
+        if (net_stalled()) {                  /* a send gave up: link wedged */
             irc_net_warn(1);
-            term_notif("WARNING: ESP not responding. Check the link / NETUP.");
+            link_bad = 1;
+#ifdef NET_BACKEND_UNET
+            notif2("WARNING: send failed: ", nerr_name(net_last_status()));
+            net_detail_line();
+#else
+            term_notif("WARNING: network not responding. Check the link.");
+#endif
             net_clear_stall();                /* re-arm so recovery can clear it */
         } else if (n) {
             irc_net_warn(0);                  /* RX flowing again -> link healthy */
+            link_bad = 0;
         }
 
         term_clock();
 
-        if (dss_testkey(&key)) {
-            u8 is_tab, plain_tab;
-            dss_scankey(&consume);
-            /* With Ctrl/Alt held the keyboard reports ascii=0 and sets bit 0x80 in
-             * scan, so match Tab on the masked scan code too (fixes Ctrl+Tab). */
-            is_tab = (key.ascii == K_TAB) || ((key.scan & 0x7F) == SC_TAB);
-            plain_tab = is_tab && !(key.modifiers & (DSS_KEYMOD_LSHIFT | DSS_KEYMOD_RSHIFT |
-                        DSS_KEYMOD_CTRL | DSS_KEYMOD_LCTRL | DSS_KEYMOD_RCTRL));
-            if (!plain_tab) comp_active = 0;        /* any other key ends a completion cycle */
-            if (quit_pending) {
-                quit_pending = 0;
-                if (key.ascii == K_ESC) break;
-                term_notif("quit cancelled");
-                continue;
+        /* Drain the whole keyboard buffer, then repaint the input row ONCE.
+         * Taking a single key per pass made the buffer the bottleneck whenever
+         * a pass ran long (a DLL call, a burst of chat rows), and it cost a
+         * full input-row repaint -- up to eighty DSS calls -- per character
+         * typed. The cap keeps a held-down key from starving the network poll. */
+        {
+            u8 drained = 0, dirty = 0, quit_now = 0;
+            while (drained < 8 && dss_testkey(&key)) {
+                u8 is_tab, plain_tab;
+                drained++;
+                dss_scankey(&consume);
+                /* With Ctrl/Alt held the keyboard reports ascii=0 and sets bit 0x80 in
+                 * scan, so match Tab on the masked scan code too (fixes Ctrl+Tab). */
+                is_tab = (key.ascii == K_TAB) || ((key.scan & 0x7F) == SC_TAB);
+                plain_tab = is_tab && !(key.modifiers & (DSS_KEYMOD_LSHIFT | DSS_KEYMOD_RSHIFT |
+                            DSS_KEYMOD_CTRL | DSS_KEYMOD_LCTRL | DSS_KEYMOD_RCTRL));
+                if (!plain_tab) comp_active = 0;        /* any other key ends a completion cycle */
+                if (quit_pending) {
+                    quit_pending = 0;
+                    if (key.ascii == K_ESC) { quit_now = 1; break; }
+                    term_notif("quit cancelled");
+                    continue;
+                }
+                if (key.ascii == K_ESC) { quit_pending = 1; term_notif("Press ESC again to quit, any other key to cancel"); }
+                else if (is_tab) {                       /* Tab/Shift+Tab/Ctrl+Tab */
+                    if (key.modifiers & (DSS_KEYMOD_LSHIFT | DSS_KEYMOD_RSHIFT)) { irc_prev_window(); dirty = 1; }
+                    else if (key.modifiers & (DSS_KEYMOD_CTRL | DSS_KEYMOD_LCTRL | DSS_KEYMOD_RCTRL)) { irc_next_window(); dirty = 1; }
+                    else if (inlen == 0) { irc_next_window(); dirty = 1; }   /* empty line: Tab cycles windows */
+                    else { do_complete(); dirty = 1; }                       /* otherwise: complete */
+                }
+                else if (key.ascii == K_ENTER) { on_enter(); dirty = 1; }
+                else if (key.ascii == K_BS) { del_before(); dirty = 1; }
+                else if (key.scan == SC_LEFT)  { if (incur > 0) { incur--; dirty = 1; } }
+                else if (key.scan == SC_RIGHT) { if (incur < inlen) { incur++; dirty = 1; } }
+                else if (key.scan == SC_HOME)  { incur = 0; dirty = 1; }
+                else if (key.scan == SC_END)   { incur = inlen; dirty = 1; }
+                else if (key.scan == SC_PGUP)  { irc_scroll_up(); dirty = 1; }
+                else if (key.scan == SC_PGDN)  { irc_scroll_down(); dirty = 1; }
+                else if (key.scan == SC_UP)    { if (ehbrowse > 0) { ehbrowse--; eh_load(ehbrowse); dirty = 1; } }
+                else if (key.scan == SC_DOWN)  { if (ehbrowse < ehcount) { ehbrowse++; if (ehbrowse == ehcount) { inlen = 0; incur = 0; } else eh_load(ehbrowse); dirty = 1; } }
+                else if ((key.modifiers & (DSS_KEYMOD_ALT | DSS_KEYMOD_LALT | DSS_KEYMOD_RALT))
+                         && (key.scan & 0x7F) >= 0x02 && (key.scan & 0x7F) <= 0x0B) {
+                    /* Alt+digit: ascii is 0, so use the scan code. PC set: 1..9,0 = 0x02..0x0B. */
+                    u8 s7 = (u8)(key.scan & 0x7F);
+                    irc_select_chan((u8)(s7 == 0x0B ? 0 : s7 - 1));   /* 1..9 -> win 1..9, 0 -> win 10 */
+                    dirty = 1;
+                }
+                else if ((key.ascii >= 32 && key.ascii < 127) || key.ascii >= 0x80) { ins_char(key.ascii); dirty = 1; }
             }
-            if (key.ascii == K_ESC) { quit_pending = 1; term_notif("Press ESC again to quit, any other key to cancel"); }
-            else if (is_tab) {                       /* Tab/Shift+Tab/Ctrl+Tab */
-                if (key.modifiers & (DSS_KEYMOD_LSHIFT | DSS_KEYMOD_RSHIFT)) { irc_prev_window(); redraw(); }
-                else if (key.modifiers & (DSS_KEYMOD_CTRL | DSS_KEYMOD_LCTRL | DSS_KEYMOD_RCTRL)) { irc_next_window(); redraw(); }
-                else if (inlen == 0) { irc_next_window(); redraw(); }   /* empty line: Tab cycles windows */
-                else { do_complete(); redraw(); }                       /* otherwise: complete */
-            }
-            else if (key.ascii == K_ENTER) { on_enter(); redraw(); }
-            else if (key.ascii == K_BS) { del_before(); redraw(); }
-            else if (key.scan == SC_LEFT)  { if (incur > 0) { incur--; redraw(); } }
-            else if (key.scan == SC_RIGHT) { if (incur < inlen) { incur++; redraw(); } }
-            else if (key.scan == SC_HOME)  { incur = 0; redraw(); }
-            else if (key.scan == SC_END)   { incur = inlen; redraw(); }
-            else if (key.scan == SC_PGUP)  { irc_scroll_up(); redraw(); }
-            else if (key.scan == SC_PGDN)  { irc_scroll_down(); redraw(); }
-            else if (key.scan == SC_UP)    { if (ehbrowse > 0) { ehbrowse--; eh_load(ehbrowse); redraw(); } }
-            else if (key.scan == SC_DOWN)  { if (ehbrowse < ehcount) { ehbrowse++; if (ehbrowse == ehcount) { inlen = 0; incur = 0; } else eh_load(ehbrowse); redraw(); } }
-            else if ((key.modifiers & (DSS_KEYMOD_ALT | DSS_KEYMOD_LALT | DSS_KEYMOD_RALT))
-                     && (key.scan & 0x7F) >= 0x02 && (key.scan & 0x7F) <= 0x0B) {
-                /* Alt+digit: ascii is 0, so use the scan code. PC set: 1..9,0 = 0x02..0x0B. */
-                u8 s7 = (u8)(key.scan & 0x7F);
-                irc_select_chan((u8)(s7 == 0x0B ? 0 : s7 - 1));   /* 1..9 -> win 1..9, 0 -> win 10 */
-                redraw();
-            }
-            else if ((key.ascii >= 32 && key.ascii < 127) || key.ascii >= 0x80) { ins_char(key.ascii); redraw(); }
+            if (dirty) redraw();
+            if (quit_now) break;
         }
     }
 
-    term_notif("Closing link, restoring ESP...");
-    if (irc_connected()) irc_quit();   /* QUIT + net_close (restores ESP) */
-    else net_close();                  /* link already down: still restore CIPMODE=0 */
+    term_notif("Closing link...");
+    /* Don't push a QUIT down a link that already refused a send: that runs the
+       whole retry ladder again, which is what made exiting take as long as the
+       failure itself. Close the socket and go. */
+    if (irc_connected() && !link_bad) irc_quit();   /* QUIT + net_close */
+    else net_close();                  /* dead or already down (ESP: restores CIPMODE=0) */
+#ifdef NET_BACKEND_UNET
+    /* NETDONE + unet_free. DSS.Exit would reclaim the DLL's page on its own,
+     * but nothing else tells the card to stop, and the UNETLD contract puts
+     * that call on us (UNETLD-SPEC.md's RESET -> ... -> UNLOAD staging). */
+    unetld_unload();
+#endif
     dss_clrscr();
     dss_gotoxy(1, 1);
     dss_puts(APP_NAME " - bye.\r\n");

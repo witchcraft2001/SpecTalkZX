@@ -11,10 +11,30 @@ platform/HAL reference.)
 ## Build
 
 ```sh
-make            # -> SPTALK.EXE (DSS executable) + NETDIAG.EXE / NETIRC.EXE
-make deploy     # build + write FAT12 floppy to distr/sptalk.img (EXEs, NET.CFG, docs)
+make                      # -> SPTALK.EXE (ESP backend, the shipping build)
+make NET_BACKEND=unet     # -> SPTALK.EXE over UNETxxxx.DLL instead
+make deploy               # build + write FAT12 floppy to distr/sptalk.img
+make diag                 # optional: NETDIAG.EXE / NETIRC.EXE bring-up tools
+make netdll               # optional: NETDLL.EXE, the UNET loader testbed
 make clean
 ```
+
+Object files live in `build/$(NET_BACKEND)/`: `NET_BACKEND` reaches the shared
+C sources through `-DNET_BACKEND_UNET`, so the two backends must not share a
+build directory.
+
+`make netdll` pairs with `node tools/test_netdll_win0.js`, which runs the real
+EXE through sprinter-rtl8019a's Z80/DSS harness against a real
+`UNETxxxx.DLL` — the automated check that the win0 DLL mechanics still work.
+`make deploy NET_BACKEND=unet` also puts `NETDLL.EXE` on the floppy: it re-runs
+SELECT/LOAD/GETCAPS/ABI/NETSTART/GETINFO on the target and names the stage that
+failed, which is the only way to tell a wrong `NET` value from a missing DLL.
+`node tools/test_sptalk_unet.js` drives the shipping `SPTALK.EXE` itself through
+the same harness (SELECT, LOAD, the `CAP_TCP` gate, `NETSTART` against the
+modelled RTL8019, clean double-ESC exit). Run it after any change to the DLL
+path: `NETDLL.EXE` stops after GETCAPS and its whole payload fits in WIN0, so it
+can neither exercise the capability gate nor a DLL swap against a WIN1 half full
+of program code, which is exactly how a broken `unetld_require` shipped once.
 
 Override the SDK path if needed: `make SDK=/path/to/sdcc45-sprinter-sdk`.
 The build never writes into the SDK tree; the floppy image lives in `distr/`.
@@ -44,14 +64,95 @@ At the DSS prompt, switch to the floppy drive and run `SPTALK`.
   region; text printed afterward keeps the region's ATTR (color). This is what
   makes per-nick colouring work: pre-set the nick cells' attribute, then `dss_puts`
   drops the characters on top without touching attributes.
-- **Memory / flat WIN1+WIN2 layout:** a program loaded at 0x4200 owns WIN1
-  (0x4000-0x7FFF) only. SPTALK now exceeds one page, so its image is built to span
-  **WIN1+WIN2** as one load (code crosses 0x8000, so DSS maps both pages from the
-  image itself) via the local `crt0_flat` — code low, data+stack high in WIN2
-  (`--data-loc 0xA800`, stack `0xBFFF`). It must NOT `Dss.GetMem`+`SetWin2`: that
-  swaps a blank page over the code already loaded into WIN2. `tools/check_layout.py`
-  guards this at build time. The small diagnostics still use the SDK `crt0_page2`
-  (single allocated WIN2 page, `--data-loc 0x8000`, stack `0xBFFF`).
+- **Memory / win0 (WIN0+WIN1+WIN2) layout:** SPTALK.EXE is a two-stage PRELOAD
+  EXE (SDK's `lib/win0/*`, `tools/win0_exe.py`, ~47 KB budget), not a normal
+  one-shot load. DSS loads only a small stage-1 loader at `0x8100`, which
+  GETMEMs three private pages and streams the real program in: code+rodata
+  span **WIN0** (`0x0180..0x3FFF`) and spill into **WIN1** (`0x4000..0x7FFF`)
+  as needed; `_WINRT` (RST `#08`/`#10`/`#38` trampolines, `win0_rt.s`, never
+  repaged), `_HIGH` (unet backend only — the DLL call dispatcher, which must
+  survive the WIN1 DLL swap below) and `_DATA`+stack live in the private WIN2
+  page (`0x8000..0xBF00`). This replaced an earlier flat WIN1+WIN2 layout
+  (`crt0_flat`, now deleted) that left only ~89 B of code headroom and no room
+  for UNET.DLL support. `tools/check_win0_layout.py` guards the invariants at
+  build time (run against the *payload* link, before `win0_exe.py` packs it
+  with the loader). The small diagnostics (NETDIAG/NETIRC) still use the SDK
+  `crt0_page2` (single allocated WIN2 page, `--data-loc 0x8000`, stack
+  `0xBFFF`) — they fit one window and don't need the extra layout.
+  - **`_DATA` is not zero-initialized by `crt0_win0.s` itself** — only
+    `_INITIALIZER→_INITIALIZED` and `_BSS` are handled there; SDCC 4.5's z80
+    backend puts *every* plain uninitialized global into `_DATA` (not `_BSS`).
+    `gsinit_zero_data.s` supplies the missing `_GSINIT` fragment (linked right
+    after `crt0_win0.rel`) so this still works exactly like the old
+    `crt0_flat`'s gsinit did.
+  - **A DLL is swapped into WIN1 with a raw `OUT`, not `dss_setwin`.** Under
+    win0 every RST `#08`/`#10` call is intercepted by a trampoline that
+    restores `WIN1 = _wrt_p1` on return — a plain `dss_setwin(1, dll_page)`
+    would be undone by the very RST `#10` call that performs it. The unet
+    dispatcher (`unetcore.s`'s `_unet_call`) instead repoints `_wrt_p1` at the
+    DLL's page for the span of the call, so a trampoline firing mid-call
+    (a DSS call from inside the DLL, or a timer interrupt) restores WIN1 back
+    to the DLL rather than evicting it. `_unet_call` itself must live in
+    `_HIGH` (WIN2) — under win0 `_CODE` spans WIN0+WIN1, and code executing
+    from the WIN1 half would vanish under its own hand the moment it remaps
+    WIN1 to the DLL.
+  - **The application directory comes from `P0:0x0100`, not `DSS_APPINFO`.**
+    The win0 stage-1 loader stages it there (parsed from the PSP before
+    handing off) with an explicit warning against calling `DSS_APPINFO`
+    directly: it scans the PSP path, which win0's own two-stage PSP layout
+    differs from, and can hang the machine when the program was itself
+    `dss_exec`'d by another. `unetldcore.s`'s DLL path resolution reads
+    `0x0100` (no trailing separator) instead.
+  - **`net_close()` closes the socket, never the link layer.** `NETDONE` tears
+    the DLL's network state down for good: every later `CONNECT` answers
+    `NERR_STATE`. Since `net_close()` is also `/close` and the keepalive
+    timeout's teardown, calling `NETDONE` there cost the session its ability to
+    reconnect. `NETDONE` + `FINI` belong to program exit only (`unetld_unload`).
+  - **A failing SEND costs a full TCP retransmit timeout inside the DLL**, so
+    the retry ladder has to be short. Only attempts that move zero bytes spend
+    the budget, a stalled link short-circuits the next line in the same batch,
+    and the exit path skips its `QUIT` once a send has given up. Before that,
+    one wedged link meant minutes of frozen UI, twice (once live, once on exit).
+  - **`unetld_require()` is `(caps & mask) == mask`, not `== caps`.** Every
+    UNET DLL reports more than TCP (UNETRTL adds UDP and raw), so a gate that
+    compares the masked result against the *caps* byte rejects all of them.
+    That bug made `net_init()` return `NET_NO_HW`, which the UI then reported
+    as a missing ESP card.
+  - **A real IRC server talks first, and that is a distinct backend code
+    path.** Every server pushes its `NOTICE AUTH` banner the moment the
+    handshake closes and keeps talking while the client is still sending
+    `NICK`/`USER`, so the client's first SEND waits for its ACK with
+    unsolicited peer data — carrying a *lower* ack number — arriving ahead of
+    it. UNETRTL 0.3.0 answered that with `NERR_SEND` ("no ACK from peer") and
+    the registration never completed; 0.3.1 (`fix(unetrtl): preserve TCP
+    payload before ACK`) handles it. Pin the backend revision: the shipped
+    DLLs are a vendor drop in `unet_libs_core/dll` with a `manifest.json`, and
+    a request/response test peer will not notice a backend that gets this
+    wrong. `tools/test_sptalk_unet.js` now models a greeting server for
+    exactly this reason, and the bring-up banner prints the DLL's own name
+    field (`UNETRTL v0.3.1`) so a field log says which revision ran.
+  - **Never hand a UNET DLL a pointer into WIN0.** The ABI permits it, but
+    UNETRTL maps its own "cold" overlay page over WIN0 (`lib/win0cold.asm`) for
+    the ARP/DNS/PING frame builders, so a caller buffer there is paged out
+    mid-call. Under the win0 layout the command line at `P0:0x0080` is the easy
+    mistake: a literal dotted quad passed straight from there fails to parse and
+    silently becomes a DNS lookup. `net_unet.s` already stages host, port and
+    every outgoing line into `_DATA` (WIN2); `netdll.c` now copies its arguments
+    the same way, and `tools/test_netdll_win0.js` fails if a DNS query appears.
+  - **WIN3 is saved and restored around every DLL call.** The UNET ABI lets a
+    DLL map its own ISA card into WIN3 per call and does not promise to put
+    the caller's page back, so `_unet_call` brackets each dispatch with
+    `in a,(#0xE2)` / `out (#0xE2),a` just as it does for WIN1.
+- **A DSS memory block ID is NOT a physical page number.** `GETMEM` (#3D)
+  returns a *block ID* in 1..255 (BIOS `EMM_FN2`); only `SETWIN`
+  (#38/#39-#3B, block + page-index) understands one. The window ports
+  `#82`/`#A2`/`#C2`/`#E2` take *physical page* numbers, and a block's pages
+  need not even be contiguous. To map a block by raw `OUT` later, cache its
+  page first — either `SETWIN` it once and read the port back (`in a,(#0xE2)`,
+  what `unetcore.s`'s `unet_load` and `lib/win0/loader.c` both do) or ask BIOS
+  `EMM_FN4`/`EMM_FN5`. libman's own `_L_CALL` follows the same rule. Confusing
+  the two maps a page the program never owned; because 0 is never a valid
+  block ID, it also makes 0 a safe "nothing allocated" sentinel.
 - **Printing: use `dss_puts` (PCHARS #5C), not per-char `dss_putchar`** — one
   syscall per line vs one per character (~80× fewer syscalls; per-char redraw of
   the chat was the cause of multi-second startup).
@@ -97,6 +198,24 @@ At the DSS prompt, switch to the floppy drive and run `SPTALK`.
 - **Cyrillic = CP866** (lowercase 'е' = 0xA5); the high range 0x80–0xFF is
   printable and renders Cyrillic glyphs directly. Incoming UTF-8 is recoded to
   CP866 and outgoing CP866 to UTF-8 (toggle with `/encoding`).
+- **SDCC 4.5 miscompiles `if (x != g) { g = x; ... }` for `u8` globals.** It
+  emits `ld a,x / ld hl,#g / sub a,(hl) / jr Z,skip / ld (g),a` — the store
+  believes `A` still holds `x`, but `SUB` left the *difference* there, so `g`
+  takes a wrong value and the guard reports a change on every call afterwards.
+  Nothing in the program's output looks wrong; it just does the guarded work
+  forever. This hit both of SprinTalk's change guards (`term_clock`'s second
+  counter and `irc_net_warn`'s flag) and cost roughly 8× the main loop's
+  throughput. **Write before comparing**:
+  `prev = g; g = x; if (prev != x) { ... }` — then the store uses a value that
+  is provably live. Grep a build for `sub[ \t]+a, \(hl\)` followed within a
+  few lines by `ld\t(_`; `tools/test_sptalk_unet.js` also bounds the idle
+  loop's screen writes per pass, which is what catches a relapse.
+- **Cost of one main-loop pass is the responsiveness budget.** DSS buffers
+  keystrokes in an interrupt handler, but a UNET DLL runs with interrupts off
+  while it owns the ISA window, so keys are only safe if the loop comes back
+  around quickly and takes *all* buffered keys, not one. SPTALK drains up to
+  eight per pass and repaints the input row once afterwards; one key per pass
+  cost a full 80-column row repaint per character typed.
 
 ## Stages
 

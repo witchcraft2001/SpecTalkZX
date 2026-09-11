@@ -23,6 +23,13 @@ u16  net_poll(u8 *buf, u16 max);                       /* non-blocking: bytes av
 void net_close(void);                                  /* escape transparent mode, close socket */
 u8   net_is_connected(void);
 u8   net_stalled(void);            /* 1 if a send recently failed (ESP not draining TX) */
+u8   net_last_status(void);        /* backend status behind the last connect/send failure;
+                                      UNET returns a NERR_* code, ESP always 0 */
+
+/* Backend's own one-line account of that failure, for the log: a UNET DLL's
+   LASTERR (which stage, which internal code, and whether the NIC actually
+   transmitted), "" on ESP. Points at a static buffer refreshed by each call. */
+const char *net_last_detail(void);
 void net_clear_stall(void);        /* acknowledge/clear the stall flag */
 u8   net_overrun(void);            /* 1 if RX bytes were lost (overrun) since last clear */
 void net_clear_overrun(void);      /* acknowledge/clear the overrun flag */
