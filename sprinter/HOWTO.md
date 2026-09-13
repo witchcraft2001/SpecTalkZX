@@ -1,23 +1,47 @@
-# SprinTalk 0.1 — How-to
+# SprinTalk 0.2.1 — How-to
 
 A practical guide to using SprinTalk, the Sprinter/DSS IRC client. For the short
 version and the command list, see README (SPTALK.TXT).
 
 ## 1. Before you start: bring up the network
 
-SprinTalk does not dial Wi-Fi itself. The SprinterWiFi kit's **NETUP** utility
-does that once: it joins your access point and publishes the live settings
-(IP, gateway, DNS, and the **serial speed**) to the system environment.
+SprinTalk does not configure the network itself — it uses the link DSS already
+has up. Each card has its own bring-up tool, which configures it and publishes
+the live settings (IP, gateway, DNS, and for Wi-Fi the **serial speed**) to the
+DSS environment, including `NET=<tag>`:
 
-Run `NETUP` first. Then run `SPTALK`. If the network is not up, SprinTalk shows
-"Wi-Fi is not up — run NETUP first" and exits. The serial speed is taken from
-NETUP automatically, so whatever baud you configured there is what SprinTalk uses
-(115200, 57600, 230400, …) — you do not set it twice.
+```
+Card                          Bring-up tool         NET    DLL
+----------------------------  --------------------  -----  ------------
+Wi-Fi / ESP (SprinterWiFi)    NETUP                 WIFI   UNETESP.DLL
+RTL8019A ISA Ethernet         NETCFG -i, then IFUP  RTL    UNETRTL.DLL
+3Com 3C509B ISA Ethernet      NETCFG -i, then IFUP  509B   UNET509B.DLL
+```
+
+Run that tool first, then run `SPTALK`. You never set `NET` by hand — the
+bring-up tool owns it.
+
+SprinTalk picks the link up by itself: it reads `NET`, loads the matching
+`UNETxxxx.DLL` **from its own directory** (the one `SPTALK.EXE` lives in), and
+logs both in the server window:
+
+```
+UNET: NET=509B -> UNET509B.DLL
+Network ready via UNET509B.DLL (UNET509B v0.3.1)
+```
+
+So keep the `UNET*.DLL` files next to `SPTALK.EXE`. If the load fails, SprinTalk
+prints the reason and keeps running with networking disabled — the UI still
+works, see section 14.
+
+On Wi-Fi the serial speed comes from what `NETUP` published, so whatever baud
+you configured there is what SprinTalk uses (115200, 57600, 230400, …) — you
+do not set it twice. The ISA cards have no baud rate at all.
 
 ## 2. The screen
 
 ```
-SprinTalk 0.1 ESP  ::  #channel                         23:21:05   <- title + clock
+SprinTalk 0.2.1 UNET ::  #channel                         23:21:05   <- title + clock
 ....................................................................
    chat area (history of the current window)
 ....................................................................
@@ -162,17 +186,30 @@ sends `QUIT`, closes the link cleanly, and returns to DSS.
 
 ## 14. Troubleshooting
 
-- **"Run NETUP first" on startup** — the network is not up; run `NETUP` and try
+- **"Run NETUP first" on startup** — Wi-Fi is not up; run `NETUP` and try
   again.
-- **Won't connect / no welcome** — check that `NETUP` really joined Wi-Fi, and
-  that the server name is correct.
+- **"UI works, networking unavailable"** — the driver
+  could not be loaded, or the link is down. SprinTalk does not exit; the line
+  just above it says why:
+  - *"env NET is empty - run the card's setup tool first"* — you did not run the
+    bring-up tool (section 1).
+  - *"DLL not found next to SPTALK.EXE (or unreadable)"* — copy the `UNET*.DLL`
+    files into the same directory as `SPTALK.EXE`. The `tried:` line printed
+    below it is the exact path that was opened.
+  - *"DLL's own name does not match env NET"* — the DLL on disk is not the one
+    `NET` asks for; copy a fresh, matching set of `UNET*.DLL` files over.
+  - *"NETINIT failed - card present but not ready"*, or
+    *"DLL reports the link is down"* — the card did not come up. Re-run the
+    bring-up tool and check what it says.
+- **Won't connect / no welcome** — check that the network really came up (the
+  card kit's own ping/test tool), and that the server name is correct.
 - **"Connection lost" / "Connection timed out"** — the link dropped (the server
   closed it, or there was no data for several minutes and the keepalive got no
   reply). SprinTalk PINGs the server when idle and gives up if the link is dead;
   reconnect with `/server …`.
-- **"ESP NOT RESPONDING"** in the status bar — a send could not go out (the ESP
-  is wedged or the serial link is stuck). Check NETUP / the card; it clears once
-  data flows again.
+- `*** LINK NOT RESPONDING ***` in the status bar — a send could not go out
+  (the card is wedged, or the serial link to the ESP is stuck). Check the card /
+  re-run the bring-up tool; it clears once data flows again.
 - **Garbled Russian** — toggle `/encoding`.
 - **Settings** — server, port, nick and NickServ password are stored in
   `SPTALK.CFG` in the current directory; delete it to reset.

@@ -12,8 +12,8 @@ Next milestone: Stage 7 (NE2000 backend + packaging).
       or wrap it). Reference: `…/sprinter-rtl8019a/src/lib/{rtl8019,arp_lib,tcp_lib}.asm`,
       `…/sprinter-rtl8019a/sprinter_rtl8019_soft.md`.
 - [ ] `NET_BACKEND=esp|ne2000` build variant; RTL reads IP/GW/MASK/DNS from env.
-- [ ] Ship the RTL build (`make distrib DIST_TAG=rtl` → `sptalk-0.1-rtl.zip`),
-      title shows `SprinTalk 0.1 RTL`.
+- [ ] Ship the RTL build (`make distrib DIST_TAG=rtl` → `sptalk-0.2.1-rtl.zip`),
+      title shows `SprinTalk 0.2.1 RTL`.
 
 ### Needs hardware verification (code done)
 - [ ] Ctrl+Tab / Shift+Tab nav, Alt+1..0 channel select, Tab completion.
@@ -39,14 +39,26 @@ Next milestone: Stage 7 (NE2000 backend + packaging).
 - [ ] Multi-server: a small picker UI instead of Up-recall; per-server autojoin.
 
 ### Memory watch
-- [ ] Code headroom ~2 KB to the WIN1+WIN2 ceiling (0xA800); data+stack nearly
-      fill WIN2 (0xA800..0xBFFF). Before large additions, trim code or move more
-      data into DSS pages (as the roster/history already do). Beyond 32 KB would
-      need code banking (--codeseg) or overlays.
+- [x] ~~Flat WIN1+WIN2 was down to ~89 B code headroom / ~1.2 KB stack margin,
+      not enough for UNET.DLL support~~ — moved to the win0 layout
+      (WIN0+WIN1+WIN2, `tools/check_win0_layout.py`; see PLATFORM.md). Current
+      margins: esp backend ~4.8 KB code / ~9.4 KB stack; unet backend ~4.3 KB
+      code / ~6.1 KB stack. Beyond that, trim code, move more data into DSS
+      pages, or code-bank (--codeseg).
 
 ## Done (recent)
-- [x] Flat WIN1+WIN2 code layout (crt0_flat, image spans 2 pages, build guard
-      `tools/check_layout.py`). Lifted the old WIN1-only ~15.5 KB code cap.
+- [x] win0 (WIN0+WIN1+WIN2) code/data layout: SPTALK.EXE is now a two-stage
+      PRELOAD EXE (SDK's `lib/win0/*`, `tools/win0_exe.py`), superseding the
+      old flat WIN1+WIN2 crt0_flat (deleted). Build guard
+      `tools/check_win0_layout.py`. Both `NET_BACKEND=esp` and `=unet` use it.
+- [x] `NET_BACKEND=unet`: UNETxxxx.DLL loader/dispatcher (unetcore.s/
+      unetldcore.s/unetcall.s), any UNET-ABI card selected at runtime via the
+      NET env var, DLL swapped into WIN1 only for the span of each call.
+      Verified end-to-end (SELECT/LOAD/GETCAPS/ABI against a real DLL) via
+      `tools/test_netdll_win0.js` on sprinter-rtl8019a's Z80/DSS harness.
+- [x] `make deploy` / `make distrib` ship UNETESP/UNETRTL/UNET509B.DLL beside
+      SPTALK.EXE for `NET_BACKEND=unet` (override `UNET_DLL_DIR` to point at
+      your unet_libs checkout).
 - [x] Multi-window model (server + up to 10), Tab/Ctrl+Tab/Shift+Tab/Alt-digit nav,
       activity (`*`) and mention (`!`) flags, 1-based status numbering.
 - [x] Per-window paged scrollback in DSS pages (PgUp/PgDn), BIOS #8A chat scroll.
@@ -59,7 +71,7 @@ Next milestone: Stage 7 (NE2000 backend + packaging).
 - [x] Settings in SPTALK.CFG: nick, NickServ pass, recent servers (SRV1..) and
       channels (CHAN1..), seeded into the input recall on startup.
 - [x] Tab autocompletion (commands + nicks) with common-prefix + cycle.
-- [x] Rebrand to SprinTalk 0.1, ESP/RTL backend tag, SPTALK.EXE, README/HOWTO
+- [x] Rebrand to SprinTalk 0.2.1, ESP/RTL backend tag, SPTALK.EXE, README/HOWTO
       → plain-text docs, `make distrib` zip.
 
 ## Not doing (intentionally — ZX cosmetic / low value on Sprinter)

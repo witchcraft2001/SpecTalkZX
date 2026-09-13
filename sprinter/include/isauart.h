@@ -4,8 +4,8 @@
  * The UART (and any ISA card) is memory-mapped into WIN3 (0xC000-0xFFFF). isa_open()
  * remaps WIN3 to the ISA space (saving the previous WIN3 page); isa_close() restores
  * it. DSS/BIOS also use WIN3, so: keep ISA open ONLY around a register/data burst and
- * never call DSS/BIOS while it is open. This program's code+data+stack live entirely
- * in WIN1, so swapping WIN3 does not disturb them.
+ * never call DSS/BIOS while it is open. This program's code/data/stack live in
+ * WIN0+WIN1+WIN2 (see the port plan's win0 layout), none of which WIN3 touches.
  *
  * TL16C550 register map (ISA base 0xC000 + COM3 0x03E8 = 0xC3E8):
  *   RBR/THR/DLL 0xC3E8  IER/DLM 0xC3E9  IIR/FCR 0xC3EA  LCR 0xC3EB

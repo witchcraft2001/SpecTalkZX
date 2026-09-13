@@ -151,13 +151,22 @@ static void status_refresh(void) {
         o_c(' ');
     }
     o_c(']');
-    if (net_warn) o_str("  *** ESP NOT RESPONDING ***");
+    if (net_warn) o_str("  *** LINK NOT RESPONDING ***");   /* transport-neutral: ESP or a UNET DLL */
     else if (registered) o_str("  online");
     o_end();
     term_status(out);
 }
 
-void irc_net_warn(u8 on) { if (net_warn != on) { net_warn = on; status_refresh(); } }
+/* Write before comparing: the same SDCC 4.5 miscompile as term_clock's second
+   counter (see PLATFORM.md). The natural form stored the DIFFERENCE into
+   net_warn, so every call looked like a change and repainted the whole
+   80-column status row -- and main.c calls this on every pass that receives
+   data, which is why the client only dragged while a server was connected. */
+void irc_net_warn(u8 on) {
+    u8 prev = net_warn;
+    net_warn = on;
+    if (prev != on) status_refresh();
+}
 
 static i8 win_find(const char *name) {
     u8 i;
@@ -605,11 +614,16 @@ void irc_on_disconnect(void) {
 void irc_keepalive(void) {
     static u8 last_s = 0xFF;
     dss_time_t t;
+    u8 sec, prev, d;
     dss_gettime(&t);
-    if (t.second == last_s) return;          /* once per second */
-    last_s = t.second;
+    sec = t.second; prev = last_s; last_s = sec;   /* write first: see term_clock() */
+    if (sec == prev) return;
+    if (prev == 0xFF) return;                /* first sample: nothing has elapsed yet */
+    /* main.c calls this only every 16th pass, so count the seconds that went
+     * by rather than the calls: a slow pass must not stretch the timeouts. */
+    d = (u8)(sec >= prev ? sec - prev : sec + 60 - prev);
     if (!link_up) return;
-    if (idle_s < 0xFFFF) idle_s++;
+    if (idle_s < (u16)(0xFFFF - d)) idle_s += d; else idle_s = 0xFFFF;
     if (idle_s >= KA_PING_S && !ka_pinged) {
         ka_pinged = 1;
         net_send("PING :keepalive\r\n");
