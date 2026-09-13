@@ -7,7 +7,7 @@ README/HOWTO so the result reads cleanly in a DOS/Sprinter text viewer.
   * headings  -> UPPERCASE line + underline of '='/'-'
   * **bold** / *italic* / `code`  -> plain text
   * [text](url)  -> text (url)
-  * bullet "- " / "* "  -> "  - "
+  * bullet "- " / "* "  -> "  - " (nested bullets keep their extra indent)
   * fenced ``` code blocks -> kept verbatim (fence lines dropped)
 Output uses CRLF line endings. By default it writes ASCII only (non-ASCII -> '?');
 pass `cp866` as the optional third argument to keep Cyrillic and CP866
@@ -36,11 +36,20 @@ def fold_ascii(s):
 def inline(s):
     s = re.sub(r'!\[[^\]]*\]\([^)]*\)', '', s)          # images
     s = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'\1 (\2)', s)  # links
-    s = re.sub(r'`([^`]*)`', r'\1', s)                   # inline code
+    # A code span is literal text, so it has to sit out the emphasis passes:
+    # `*** LINK NOT RESPONDING ***` is a message the program prints, and the
+    # bold rule would otherwise eat its asterisks. Stash, strip, restore.
+    spans = []
+
+    def stash(m):
+        spans.append(m.group(1))
+        return '\x00%d\x00' % (len(spans) - 1)
+
+    s = re.sub(r'`([^`]*)`', stash, s)                   # inline code
     s = re.sub(r'\*\*([^*]+)\*\*', r'\1', s)             # bold
     s = re.sub(r'(?<!\*)\*([^*]+)\*(?!\*)', r'\1', s)    # italic
     s = re.sub(r'__([^_]+)__', r'\1', s)
-    return s
+    return re.sub(r'\x00(\d+)\x00', lambda m: spans[int(m.group(1))], s)
 
 
 def convert(md, ascii_only=True):
@@ -64,7 +73,9 @@ def convert(md, ascii_only=True):
             continue
         m = re.match(r'^(\s*)[-*+]\s+(.*)$', line)
         if m:
-            out.append('  ' + fold(inline(m.group(2))).rstrip())
+            # Keep nesting: a sub-bullet's own indent is carried through, so a
+            # list of sub-cases does not read as a list of separate problems.
+            out.append('  ' + m.group(1) + fold(inline(m.group(2))).rstrip())
             continue
         out.append(fold(inline(line)).rstrip())
     # collapse 3+ blank lines to 1

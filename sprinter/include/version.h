@@ -12,7 +12,7 @@
 #define VERSION_H
 
 #define APP_NAME    "SprinTalk"
-#define APP_VER     "0.1"
+#define APP_VER     "0.2.1"
 #define APP_AUTHOR  "Dmitry Mikhalchenkov, SprinterTeam. FidoNet:2:5030/1997.10"
 
 /* Compiler-stamped build date/time. Only fresh in the translation unit being
@@ -27,6 +27,6 @@
 #endif
 #endif
 
-#define APP_TITLE   APP_NAME " " APP_VER " " APP_BACKEND   /* e.g. "SprinTalk 0.1 ESP" */
+#define APP_TITLE   APP_NAME " " APP_VER " " APP_BACKEND   /* e.g. "SprinTalk 0.2.1 ESP" */
 
 #endif /* VERSION_H */

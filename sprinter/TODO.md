@@ -12,8 +12,8 @@ Next milestone: Stage 7 (NE2000 backend + packaging).
       or wrap it). Reference: `…/sprinter-rtl8019a/src/lib/{rtl8019,arp_lib,tcp_lib}.asm`,
       `…/sprinter-rtl8019a/sprinter_rtl8019_soft.md`.
 - [ ] `NET_BACKEND=esp|ne2000` build variant; RTL reads IP/GW/MASK/DNS from env.
-- [ ] Ship the RTL build (`make distrib DIST_TAG=rtl` → `sptalk-0.1-rtl.zip`),
-      title shows `SprinTalk 0.1 RTL`.
+- [ ] Ship the RTL build (`make distrib DIST_TAG=rtl` → `sptalk-0.2.1-rtl.zip`),
+      title shows `SprinTalk 0.2.1 RTL`.
 
 ### Needs hardware verification (code done)
 - [ ] Ctrl+Tab / Shift+Tab nav, Alt+1..0 channel select, Tab completion.
@@ -71,7 +71,7 @@ Next milestone: Stage 7 (NE2000 backend + packaging).
 - [x] Settings in SPTALK.CFG: nick, NickServ pass, recent servers (SRV1..) and
       channels (CHAN1..), seeded into the input recall on startup.
 - [x] Tab autocompletion (commands + nicks) with common-prefix + cycle.
-- [x] Rebrand to SprinTalk 0.1, ESP/RTL backend tag, SPTALK.EXE, README/HOWTO
+- [x] Rebrand to SprinTalk 0.2.1, ESP/RTL backend tag, SPTALK.EXE, README/HOWTO
       → plain-text docs, `make distrib` zip.
 
 ## Not doing (intentionally — ZX cosmetic / low value on Sprinter)

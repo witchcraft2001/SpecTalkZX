@@ -174,7 +174,7 @@ TXT_HOWTO  = $(BUILD)/HOWTO.TXT
 TXT_HOWTO_RU = $(BUILD)/HOWTO_RU.TXT
 
 # Release zip
-DIST_VER ?= 0.1
+DIST_VER ?= 0.2.1
 # Names the archive after the transport that is actually in the binary, so a
 # `make distrib NET_BACKEND=unet` can't be mistaken for the ESP build. Override
 # for a narrower label (the plan's `make distrib DIST_TAG=rtl`, say).
@@ -190,7 +190,18 @@ diag: $(DIAG_EXES)
 # Optional: build the UNET loader diagnostic by hand.
 netdll: $(NETDLL_EXE)
 
-$(BUILD)/%.rel: $(SRCDIR)/%.c
+# No automatic header dependency tracking (no -MMD/.d files), so a .rel whose
+# .c hasn't changed can go stale silently when a header it includes has --
+# APP_VER in include/version.h did exactly this to irc.rel's baked-in CTCP
+# VERSION/USER/QUIT strings and the title bar (main.c is force-rebuilt below
+# and so was spared; irc.c was not, and shipped "0.1" everywhere except the
+# startup banner after a version-only bump). List every header here whose
+# change must force a full C rebuild; a separate prerequisite-only pattern
+# rule for the same target does NOT get merged with this one by make, so it
+# has to live in this same rule's prerequisite list.
+TRACKED_HEADERS = include/version.h
+
+$(BUILD)/%.rel: $(SRCDIR)/%.c $(TRACKED_HEADERS)
 	@mkdir -p $(@D)
 	$(SDCC) $(CFLAGS) -c -o $@ $<
 

@@ -82,7 +82,10 @@ const r = run({ responders: { arp: {}, tcp: {} } });
 const out = r.output;
 if (process.env.TRACE === '1') console.error(out);
 
-assert.ok(out.includes('SprinTalk 0.1 UNET'),
+// Not pinned to a version number: this same "0.1" literal going stale next
+// to a real "0.2.1" build (a header-dependency gap in the Makefile, since
+// fixed) is what caused a mixed-version EXE to ship unnoticed once already.
+assert.match(out, /SprinTalk \d+\.\d+(?:\.\d+)? UNET/,
   'SPTALK.EXE is not the unet build -- rebuild with `make NET_BACKEND=unet`');
 assert.ok(out.includes('UNET: NET=RTL -> UNETRTL.DLL'),
   `SELECT did not resolve NET=RTL to UNETRTL.DLL -- got:\n${out}`);
