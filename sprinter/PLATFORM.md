@@ -210,12 +210,40 @@ At the DSS prompt, switch to the floppy drive and run `SPTALK`.
   is provably live. Grep a build for `sub[ \t]+a, \(hl\)` followed within a
   few lines by `ld\t(_`; `tools/test_sptalk_unet.js` also bounds the idle
   loop's screen writes per pass, which is what catches a relapse.
-- **Cost of one main-loop pass is the responsiveness budget.** DSS buffers
-  keystrokes in an interrupt handler, but a UNET DLL runs with interrupts off
-  while it owns the ISA window, so keys are only safe if the loop comes back
-  around quickly and takes *all* buffered keys, not one. SPTALK drains up to
-  eight per pass and repaints the input row once afterwards; one key per pass
-  cost a full 80-column row repaint per character typed.
+- **Cost of one main-loop pass is the responsiveness budget.** SPTALK drains
+  up to eight keys per pass and repaints the input row once afterwards; one
+  key per pass cost a full 80-column row repaint per character typed. The
+  keyboard itself is safe across a slow pass (next bullet) -- what a slow pass
+  costs is latency, not keys.
+- **How DSS keeps keys (from `sprinter_dss/KEYINTER.ASM`).** `KEYSCAN` runs
+  from the `RST #38` handler -- the frame interrupt and the PS/2 byte
+  interrupt both land there -- and pushes complete keystrokes into a 16-entry
+  ring (`SBUF`, 4 bytes each). `TESTKEY` (0x37) peeks the head, `SCANKEY`
+  (0x31) pops it; `K_CLEAR` empties it. A key that reached the ring can only
+  be lost if the ring fills (fifteen unread keys) or **something else pops
+  it**. Interrupts stay enabled through the UNET DLL calls (UNET509B has no
+  `di` at all), so the ring keeps filling while a pass runs long.
+- **UNET DLLs may pop the keyboard ring.** A backend polls Esc/Ctrl+C with
+  `DSS_SCANKEY` inside every RECV/SEND wait iteration when `SETOPT CANCELKEYS`
+  is 1; any non-cancel key it pops is simply discarded. The option defaults to
+  0, UNETRTL and UNETESP honour it -- and UNET509B stored it but never read it,
+  polling unconditionally. With SPTALK's `net_poll` calling RECV at the top of
+  every pass, about half of what was typed while connected through the 3C509B
+  went into the DLL instead of the input row (fixed in `sprinter-3C509B`
+  `tcp_transport.asm`/`udp_transport.asm`; `net_unet.s` now also sends
+  `SETOPT CANCELKEYS=0` right after NETSTART). The RTL harness could not show
+  this: UNETRTL never popped a key. `tools/test_sptalk_unet.js` pins it from
+  the client side -- the number of SCANKEY pops in a connected typing session
+  must equal the number of keys typed.
+- **`DSS_SYSTIME` is slow: about 2 ms on real hardware.** DSS reads the CMOS
+  clock one register at a time through BIOS `#F5`/`#F6` calls (`DOS5.ASM
+  SYSTIME`: nine of them, each a trampoline round trip under win0); the 3C509B kit's
+  NETPROF measured `WAIT_TICK`(1 ms)+`READ_WALL` at 348/s. The harness models
+  it as free, so it never showed up there. Never read it per pass: main.c
+  reads it every 16th pass for the clock and the keepalive (which counts the
+  seconds elapsed, not the calls). A one-quantum UNET509B RECV (SPTALK's
+  `IY=0` poll) used to cost one `SYSTIME` plus a 1 ms busy-wait before it
+  reported "nothing"; `nettime.asm` now skips both for a poll that short.
 
 ## Stages
 

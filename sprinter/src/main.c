@@ -116,6 +116,12 @@ static u8   ehcount, ehfirst, ehbrowse;
 
 static void redraw(void) { term_input(inbuf, inlen, incur); }
 
+/* Main-loop pass counter: the clock and the keepalive read DSS_SYSTIME, which
+ * walks the CMOS through BIOS calls and costs about 2 ms on real hardware --
+ * two of them per pass were most of an idle pass. Both only need to notice a
+ * second changing, so they run every 16th pass. */
+static u8 pass;
+
 static void ins_char(u8 c) {
     u16 i;
     if (inlen >= IN_MAX - 1) return;
@@ -573,6 +579,7 @@ void main(void) {
     redraw();
 
     for (;;) {
+        u8 slow = (u8)!(++pass & 15);     /* every 16th pass: SYSTIME readers */
         n = net_poll(rxb, sizeof(rxb));   /* drain UART first, before slower work */
         if (net_overrun()) {              /* RX bytes were lost: never parse the damaged IRC line */
             net_clear_overrun();
@@ -586,7 +593,7 @@ void main(void) {
             term_notif("Connection lost (server closed the link)");
         }
         was_conn = irc_connected();
-        irc_keepalive();                      /* PING when idle; drop a dead link after a timeout */
+        if (slow) irc_keepalive();            /* PING when idle; drop a dead link after a timeout */
 
         if (net_stalled()) {                  /* a send gave up: link wedged */
             irc_net_warn(1);
@@ -603,7 +610,7 @@ void main(void) {
             link_bad = 0;
         }
 
-        term_clock();
+        if (slow) term_clock();
 
         /* Drain the whole keyboard buffer, then repaint the input row ONCE.
          * Taking a single key per pass made the buffer the bottleneck whenever

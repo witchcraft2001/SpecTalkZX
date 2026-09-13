@@ -173,6 +173,7 @@ i8   unet_connect(const char *host, const char *port);
 i16  unet_send(const void *buf, u16 len);
 i16  unet_recv(void *buf, u16 max, u16 timeout_ms, u16 *flags);
 i8   unet_close(void);
+i8   unet_setopt(u8 opt, u16 value);   /* UNET_FN_SETOPT; NERR_NOTSUP = no such option */
 
 i8   unet_netinit(void);         /* UNET_FN_NETINIT */
 i8   unet_netdone(void);         /* UNET_FN_NETDONE */

@@ -67,6 +67,7 @@
         .globl _unet_send
         .globl _unet_recv
         .globl _unet_close
+        .globl  _unet_setopt
         .globl _unet_netinit
         .globl _unet_netdone
         .globl _unet_netstatus
@@ -106,6 +107,7 @@ FN_CLOSE        = 8
 FN_STATUS       = 9
 FN_GETINFO      = 15
 FN_LASTERR      = 16
+FN_SETOPT       = 17
 NERR_OK         = 0
 NERR_STATE      = 11
 LOAD_OK         = 0
@@ -962,6 +964,28 @@ _unet_close::
 uclose_go:
         ld      a, #FN_CLOSE
         jp      uc_call0
+
+; ==========================================================================
+; unet_setopt(u8 opt, u16 value) -- opt in A, value in DE (SDCC 4.5 ABI).
+; Out: A = NERR_* (NERR_NOTSUP when the backend has no such option).
+; ==========================================================================
+_unet_setopt::
+        ld      (g_regs + 1), de        ; de field = value
+        ld      (g_regs), a             ; a field = option id
+        xor     a
+        ld      (g_regs + 3), a
+        ld      (g_regs + 4), a
+        ld      (g_regs + 5), a
+        ld      (g_regs + 6), a
+        call    _unet_loaded
+        or      a
+        jr      nz, usetopt_go
+        ld      a, #NERR_STATE
+        ret
+usetopt_go:
+        ld      a, #FN_SETOPT
+        ld      de, #g_regs
+        jp      _unet_call
 
 ; ==========================================================================
 ; unet_netinit(void) / unet_netdone(void)

@@ -58,6 +58,7 @@
         .globl _unetld_load
         .globl _unetld_require
         .globl _unetld_netstart
+        .globl _unet_setopt
         .globl _unetld_unload
 
         .globl _unet_connect
@@ -479,6 +480,15 @@ ni_require_ok:
         ld      a, #NET_NO_LINK
         ret
 ni_ok:
+        ; The DLL must leave the keyboard alone. SETOPT CANCELKEYS=0 is the
+        ; documented default, but say so explicitly: a backend that polls Esc
+        ; with DSS_SCANKEY inside its RECV/SEND waits pops -- and drops --
+        ; every key the client has not collected yet, which read as "half of
+        ; what I type vanishes" (UNET509B did this unconditionally; see
+        ; PLATFORM.md). NERR_NOTSUP from a backend without the option is fine.
+        ld      a, #1                   ; UNET_OPT_CANCELKEYS
+        ld      de, #0
+        call    _unet_setopt
         xor     a
         ret
 

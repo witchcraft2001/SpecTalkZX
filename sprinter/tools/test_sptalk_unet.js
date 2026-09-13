@@ -197,11 +197,22 @@ assert.ok(perPass(0x52) < 0.5,
 // drawing it character by character charged ~80 DSS calls per character typed.
 // term.c assembles the row and pushes it with one dss_puts instead.
 const typed = 'hello everyone this is a reasonably long message typed into the input row';
+const typingKeys = ['/server 192.168.1.10 6667', 'enter', typed, 'escape', 'escape'];
 const typing = run({
   responders: { arp: {}, tcp: {} },
-  keys: ['/server 192.168.1.10 6667', 'enter', typed, 'escape', 'escape'],
+  keys: typingKeys,
   keyIntervalScans: 40, timeStepSeconds: 0.004,
 });
+// Every key must be popped from the DSS keyboard ring by SPTALK itself, once.
+// A UNET backend polls Esc with SCANKEY inside its RECV/SEND waits only when
+// SETOPT CANCELKEYS is 1 (net_unet.s sets it to 0 right after NETSTART); one
+// that polls unconditionally -- UNET509B did -- pops and drops about every
+// other key typed while connected, which is exactly when this run types.
+// Named keys are one press each, a string is one press per character.
+const typingPresses = typingKeys.reduce((n, k) => n + (k.length === 1 || ['enter', 'escape', 'backspace', 'tab', 'ctrl-c'].includes(k) ? 1 : k.length), 0);
+assert.strictEqual(typing.dssCalls[0x31] || 0, typingPresses,
+  `${typingPresses} keys typed but SCANKEY was called ${typing.dssCalls[0x31]} times: ` +
+  'something other than main.c is popping the keyboard ring (a DLL polling Esc?)');
 // The budget is a whole-session figure, since the clock also spends a handful
 // of single-character writes per modelled second. Per-column drawing of the
 // input row put this run at ~3750; drawing the row in one call puts it at ~250.

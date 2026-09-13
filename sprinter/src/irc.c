@@ -614,11 +614,16 @@ void irc_on_disconnect(void) {
 void irc_keepalive(void) {
     static u8 last_s = 0xFF;
     dss_time_t t;
+    u8 sec, prev, d;
     dss_gettime(&t);
-    if (t.second == last_s) return;          /* once per second */
-    last_s = t.second;
+    sec = t.second; prev = last_s; last_s = sec;   /* write first: see term_clock() */
+    if (sec == prev) return;
+    if (prev == 0xFF) return;                /* first sample: nothing has elapsed yet */
+    /* main.c calls this only every 16th pass, so count the seconds that went
+     * by rather than the calls: a slow pass must not stretch the timeouts. */
+    d = (u8)(sec >= prev ? sec - prev : sec + 60 - prev);
     if (!link_up) return;
-    if (idle_s < 0xFFFF) idle_s++;
+    if (idle_s < (u16)(0xFFFF - d)) idle_s += d; else idle_s = 0xFFFF;
     if (idle_s >= KA_PING_S && !ka_pinged) {
         ka_pinged = 1;
         net_send("PING :keepalive\r\n");
